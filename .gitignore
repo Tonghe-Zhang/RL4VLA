@@ -30,4 +30,9 @@ openvla/
 wandb/
 
 
-SimplerEnv/octo_collect/
+/nvme_data/tonghe/RL4VLA/SimplerEnv/octo_collect/
+
+
+.mp4
+.npz
+.pt
