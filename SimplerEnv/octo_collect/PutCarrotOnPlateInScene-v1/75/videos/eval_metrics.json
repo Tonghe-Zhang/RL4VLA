@@ -1,0 +1,12 @@
+{
+    "elapsed_steps": 1.0,
+    "moved_correct_obj": 0.0,
+    "moved_wrong_obj": 0.0,
+    "is_src_obj_grasped": 0.2953125,
+    "consecutive_grasp": 0.228125,
+    "src_on_target": 0.121875,
+    "success": 0.121875,
+    "total_episodes": 640,
+    "total_steos": 51200,
+    "time/episodes_per_second": 0.6552971828216921
+}
