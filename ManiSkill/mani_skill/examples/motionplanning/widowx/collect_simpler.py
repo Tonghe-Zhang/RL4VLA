@@ -240,3 +240,6 @@ if __name__ == "__main__":
     parsed_args = tyro.cli(Args)
     main(parsed_args)
     print(f"Total time taken: {time.time() - start}")
+    if parsed_args.save_data:
+        exp_dir = Path(parsed_args.record_dir) / parsed_args.env_id / f"{parsed_args.num_traj}" / "data"
+        print(f"Data saved to {exp_dir} ")

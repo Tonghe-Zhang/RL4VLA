@@ -21,7 +21,9 @@ def pick_and_place(env, seed=None, debug=False, vis=False, use_rrt=False, plan_t
 
     cls = VLADataCollectWidowXArmMotionPlanningSolver if simpler_collcet else WidowXArmMotionPlanningSolver
     planner = cls(
-        env,
+        camera_name='3rd_view_camera', # Revised,
+        proprioception_type='qpos', # Revised,
+        env=env,
         debug=debug,
         vis=vis,
         base_pose=env.unwrapped.agent.robot.pose,

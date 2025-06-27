@@ -136,6 +136,9 @@ CUDA_VISIBLE_DEVICES=$cuda \
 python -m mani_skill.examples.motionplanning.widowx.collect_simpler \
   -e "PutOnPlateInScene25Single-v1" \
   --save_video --save_data --num_procs 1 --num_traj 75 --seed=0
+# in default, we use arm_pd_ee_target_delta_pose_align2_gripper_pd_joint_pos control mode, which is actually a delta action control. \Delta \theta
+
+
 
 # for SFT (extra 16 trajectories for performance evaluation)
 conda activate rlvla_env

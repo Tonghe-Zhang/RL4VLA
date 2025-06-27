@@ -6,13 +6,29 @@ from mani_skill.agents.controllers.utils.delta_pose import get_numpy, to_numpy
 from PIL import Image
 
 class VLADataCollector:
-    def __init__(self, env: BaseEnv, camera_name: str, is_image_encode: bool = False, *args, **kwargs,):
+    def __init__(self, env: BaseEnv, 
+                 camera_name: str, 
+                 is_image_encode: bool = False, 
+                 proprioception_type: str = 'qpos',
+                 *args, **kwargs,):
+        """
+        Args:
+            proprioception_type: the type of informaiton needed to describe the robot's proprioceptive states. Supported types: \
+                **qpos** (joint angles), **qvel** (joint velocities) for a static robot, \
+                and also includes root_pose, root_vel, root_angular_vel for a mobile robot, and all_robot_state for all of them. \
+                Currently we do not support returning the controller's states but you can add it from ManiSkill/mani_skill/agents/base_agent.py
+        """
         self.env = env.unwrapped
         self.camera_name = camera_name
         self.is_image_encode = is_image_encode
 
         self.data_dict = self.get_empty_data_dict()
-
+        self.proprioception_type:str=proprioception_type
+        
+        # check for plausible proprioception_types
+        candidate_proprioception_types=['qpos', 'qvel', 'root_pose', 'root_vel', 'root_angular_vel', 'all_robot_state']
+        if self.proprioception_type not in candidate_proprioception_types:
+            raise ValueError(f"Unsupported proprioception_type:{proprioception_type}, it should be one of {candidate_proprioception_types} !")
 
     def get_empty_data_dict(self):
         data_dict = {
@@ -20,6 +36,7 @@ class VLADataCollector:
             "image": [],
             "instruction": None,
             "action": [],
+            "state": [],   # Revised
             "info": [],
         }
         return data_dict
@@ -66,6 +83,32 @@ class VLADataCollector:
         self.data_dict["image"].append(rgb)
 
     # should run before env.step()
+    def update_state(self):
+        """
+        Write the robot's proprioception, which is a numpy arra and is determined by self.proprioception_type, 
+        to self.data_dict['state']. 
+        """
+        # Revised
+        state=None
+        self.env: BaseEnv
+        if self.proprioception_type == 'qpos':
+            state=self.env.agent.robot.get_qpos()                   # [N, 6] without grippers, [N,7] or [N,8] with grippers
+        elif self.proprioception_type == 'qvel':
+            state=self.env.agent.robot.get_qvel()                   # [N, 6] without grippers, [N,7] or [N,8] with grippers
+        elif self.proprioception_type == 'root_pose':
+            state=self.env.agent.robot.root.pose                    # [N, 3]
+        elif self.proprioception_type == 'root_vel':
+            state=self.env.agent.robot.root.get_linear_velocity()   # [N, 3]
+        elif self.proprioception_type == 'root_angular_vel':
+            state=self.env.agent.robot.root.get_angular_velocity()  # [N, 3]
+        else:
+            state=self.env.agent.robot.get_state()   
+        
+        # for motionplanning, we run one instance per CPU thread and use the first and only state as the robot's state. 
+        state=state[0].cpu().numpy()
+        self.data_dict['state'].append(state)                       #[state_dim,]
+        
+    # should run before env.step()
     def update_action(self, action):
         self.data_dict['action'].append(action)
 
@@ -77,5 +120,6 @@ class VLADataCollector:
     def update_data_dict(self, action):
         self.update_instruction()
         self.update_image(self.camera_name)
+        self.update_state()  # Revised
         self.updata_info()
         self.update_action(action.astype(np.float32))

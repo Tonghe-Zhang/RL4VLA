@@ -238,10 +238,14 @@ def get_numpy(data, device="cpu"):
         raise TypeError("parameter passed is not torch.tensor")
 
 class VLADataCollectWidowXArmMotionPlanningSolver(WidowXArmMotionPlanningSolver):
-    def __init__(self,*args, **kwargs):
+    def __init__(self, camera_name='3rd_view_camera', proprioception_type='qpos', *args, **kwargs):
+        # Revised
         super().__init__(*args, **kwargs)
-        self.camera_name = "3rd_view_camera"
-        self.data_collector = VLADataCollector(self.env, self.camera_name)
+        if camera_name !='3rd_view_camera':
+            raise ValueError(f"Currently we only support 3rd_view_camera, but got {camera_name}!")
+        self.camera_name = camera_name  # the Bridge dataset only records 3rd_view_camera. 
+        self.proprioception_type = proprioception_type     # by default, pi-zero receives qpos as proprioception type. 
+        self.data_collector = VLADataCollector(self.env, self.camera_name, is_image_encode=False, proprioception_type=self.proprioception_type) # Revised
         self.last_abs_action_pose = None
         self.num = 0
         self.kinematics = Kinematics(
@@ -281,7 +285,9 @@ class VLADataCollectWidowXArmMotionPlanningSolver(WidowXArmMotionPlanningSolver)
     def follow_path(self, result, refine_steps: int = 0): 
         n_step = result["position"].shape[0]
         for i in range(n_step + refine_steps):
+            # for widowX.collect with MP, control_model==arm_pd_ee_target_delta_pose_align2_gripper_pd_joint_pos
             qpos = result["position"][min(i, n_step - 1)]
+            # for widowX, qpos is a 6DoF foating-point list.
             if self.control_mode == "pd_joint_pos_vel":
                 qvel = result["velocity"][min(i, n_step - 1)]
                 action = np.hstack([qpos, qvel, self.gripper_state])

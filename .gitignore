@@ -36,3 +36,6 @@ wandb/
 .mp4
 .npz
 .pt
+
+
+ManiSkill/mp_collect
