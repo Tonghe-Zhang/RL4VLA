@@ -13,6 +13,8 @@ class VLADataCollector:
                  *args, **kwargs,):
         """
         Args:
+            is_image_encode:
+                When toggled, compres the raw image tensor into JPEG format (to save memory or facilitate storage/transmission). 
             proprioception_type: the type of informaiton needed to describe the robot's proprioceptive states. Supported types: \
                 **qpos** (joint angles), **qvel** (joint velocities) for a static robot, \
                 and also includes root_pose, root_vel, root_angular_vel for a mobile robot, and all_robot_state for all of them. \
@@ -74,6 +76,9 @@ class VLADataCollector:
         else:
             rgb = self.env.get_obs()['sensor_data'][camera_name]['rgb'].squeeze(0).to(torch.uint8)
         if self.is_image_encode:
+            """
+            When toggled, compres the raw image tensor into JPEG format (to save memory or facilitate storage/transmission). 
+            """
             success, encoded_rgb = cv2.imencode('.jpeg', get_numpy(rgb,self.env.unwrapped.device), [cv2.IMWRITE_JPEG_QUALITY, 95])
             if not success:
                 raise ValueError("JPEG encode error.")
