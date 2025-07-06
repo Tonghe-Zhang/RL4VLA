@@ -31,7 +31,7 @@ class VLADataCollector:
         candidate_proprioception_types=['qpos', 'qvel', 'root_pose', 'root_vel', 'root_angular_vel', 'all_robot_state']
         if self.proprioception_type not in candidate_proprioception_types:
             raise ValueError(f"Unsupported proprioception_type:{proprioception_type}, it should be one of {candidate_proprioception_types} !")
-
+    
     def get_empty_data_dict(self):
         data_dict = {
             "is_image_encode": self.is_image_encode,

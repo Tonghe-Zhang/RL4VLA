@@ -1,7 +1,9 @@
 import os
+import sys
 import glob
 import numpy as np
 import torch
+import torch.utils.data
 from torchvision import transforms
 from tqdm import tqdm
 from pathlib import Path
@@ -9,10 +11,11 @@ from typing import List, Dict, Any, Optional
 import argparse
 import json
 from enum import Enum
+from collections import defaultdict
 
 
 """
-How to create the dataset for SFT training:
+Create the dataset for pi-zero SFT training:
 ```bash
 # Create SFT-compatible dataset
 python episode2dataset_sft_style.py \
@@ -36,6 +39,23 @@ How to load the dataset for SFT:
 ```python
 # Load the SFT dataset
 dataset = torch.load("pi_zero_sft_dataset.pt")
+
+dataset = {
+            "train": train_dataset,
+            "val": val_dataset,
+            "metadata": {
+                "image_key": self.image_key,
+                "total_filtered_actions": total_filtered,
+                "data_configs": self.data_configs,
+                "dataset_stats": dataset_stats,  # Pi-zero needs this!
+                "normalization_mapping": {k: v.value for k, v in self.normalization_mapping.items()},
+                "normalization_files": [str(f) for f in stats_files] if stats_files else [],
+                "train_samples": len(train_samples),
+                "val_samples": len(val_samples),
+                "sample_keys": list(train_samples[0].keys()) if train_samples else [],
+            }
+        }
+
 train_dataset = dataset["train"]
 val_dataset = dataset["val"]
 
@@ -51,7 +71,7 @@ dataloader = torch.utils.data.DataLoader(
 for batch in dataloader:
     # batch["observation.state"]: [batch_size, state_dim]
     # batch["action"]: [batch_size, action_dim] 
-    # batch["observation.images.image"]: [batch_size, 3, H, W]
+    # batch["observation.images.top"]: [batch_size, 3, H, W]
     # batch["task"]: List[str] of length batch_size
     
     # Feed directly to pi-zero policy
@@ -113,7 +133,7 @@ def compute_dataset_stats(all_states, all_actions, all_images, image_key, normal
         all_states: List of state tensors [state_dim]
         all_actions: List of action tensors [action_dim]
         all_images: List of image tensors [3, H, W]
-        image_key: Key name for images (e.g. "observation.images.image")
+        image_key: Key name for images (e.g. "observation.images.top")
         normalization_mapping: Dict mapping modality types to normalization modes
     
     Returns:
@@ -140,7 +160,9 @@ def compute_dataset_stats(all_states, all_actions, all_images, image_key, normal
                 "min": states_tensor.min(dim=0)[0].to(dtype=torch.float32),  # [state_dim]
                 "max": states_tensor.max(dim=0)[0].to(dtype=torch.float32),  # [state_dim]
             }
-    
+        else:
+            raise ValueError(f"Invalid state normalization_mapping={normalization_mapping}, should be in {NormalizationMode.MIN_MAX} or {NormalizationMode.MEAN_STD}")
+
     # Action statistics - compute across ALL timesteps from ALL episodes
     if all_actions and normalization_mapping.get("ACTION") != NormalizationMode.IDENTITY:
         # Stack all action tensors: [total_timesteps, action_dim]
@@ -157,6 +179,8 @@ def compute_dataset_stats(all_states, all_actions, all_images, image_key, normal
                 "min": actions_tensor.min(dim=0)[0].to(dtype=torch.float32),  # [action_dim]
                 "max": actions_tensor.max(dim=0)[0].to(dtype=torch.float32),  # [action_dim]
             }
+        else:
+            raise ValueError(f"Invalid action normalization_mapping={normalization_mapping}, should be in {NormalizationMode.MIN_MAX} or {NormalizationMode.MEAN_STD}")
     
     # Image statistics - compute across ALL timesteps from ALL episodes (per-channel)
     if all_images and normalization_mapping.get("VISUAL") != NormalizationMode.IDENTITY:
@@ -282,7 +306,7 @@ def validate_pi_zero_stats_compatibility(dataset_stats, normalization_mapping, i
     print("✅ All checks passed! Dataset stats are pi-zero compatible.")
 
 
-def save_normalization_stats(stats, output_dir, filename="normalization_stats", normalization_mapping=None):
+def save_normalization_stats(stats, output_dir, task_name, filename="normalization_stats", normalization_mapping=None):
     """
     Save normalization statistics in multiple formats for convenience.
     
@@ -305,19 +329,28 @@ def save_normalization_stats(stats, output_dir, filename="normalization_stats", 
     
     # Save as PyTorch file (for direct loading in pi-zero)
     torch_file = output_dir / f"{filename}.pt"
+    stats['env_name'] = task_name
     torch.save(stats, torch_file)
     print(f"Saved normalization statistics (PyTorch format): {torch_file}")
     
     # Save as JSON for human readability (convert tensors to lists)
     json_stats = {}
     for key, stat_dict in stats.items():
-        json_stats[key] = {}
-        for stat_name, tensor_val in stat_dict.items():
-            json_stats[key][stat_name] = tensor_val.tolist()
-    
+        if not key=='env_name':
+            json_stats[key] = {}
+            for stat_name, tensor_val in stat_dict.items():
+                tensor_val: torch.Tensor
+                json_stats[key][stat_name] = tensor_val.tolist()
+    # Add metadata (env_name and flag) to JSON
+    json_data = {
+        "metadata": {
+            "env_name": task_name,
+        },
+        "stats": json_stats
+    }
     json_file = output_dir / f"{filename}.json"
     with open(json_file, 'w') as f:
-        json.dump(json_stats, f, indent=2)
+        json.dump(json_data, f, indent=2)
     print(f"Saved normalization statistics (JSON format): {json_file}")
     
     # Save summary as text file
@@ -335,16 +368,19 @@ def save_normalization_stats(stats, output_dir, filename="normalization_stats", 
         f.write("Statistics (Pi-Zero Compatible Format):\n")
         for key, stat_dict in stats.items():
             f.write(f"{key}:\n")
-            for stat_name, tensor_val in stat_dict.items():
-                f.write(f"  {stat_name}: shape={list(tensor_val.shape)}, dtype={tensor_val.dtype}\n")
-                if tensor_val.numel() <= 10:  # Show full tensor if small
-                    f.write(f"    values: {tensor_val.flatten().tolist()}\n")
-                else:  # Show first few values if large
-                    f.write(f"    first 5 values: {tensor_val.flatten()[:5].tolist()}\n")
-                    f.write(f"    range: [{tensor_val.min().item():.6f}, {tensor_val.max().item():.6f}]\n")
-            f.write("\n")
+            if key=='env_name':
+                f.write(f"{stat_dict}\n")
+            else:
+                for stat_name, tensor_val in stat_dict.items():
+                    f.write(f"  {stat_name}: shape={list(tensor_val.shape)}, dtype={tensor_val.dtype}\n")
+                    if tensor_val.numel() <= 10:  # Show full tensor if small
+                        f.write(f"    values: {tensor_val.flatten().tolist()}\n")
+                    else:  # Show first few values if large
+                        f.write(f"    first 5 values: {tensor_val.flatten()[:5].tolist()}\n")
+                        f.write(f"    range: [{tensor_val.min().item():.6f}, {tensor_val.max().item():.6f}]\n")
+                f.write("\n")
         
-        f.write("Compatibility Check:\n")
+        f.write("\n\nCompatibility Check:\n")
         f.write("✅ All tensors are torch.float32\n")
         f.write("✅ All shapes match pi-zero expectations\n")
         f.write("✅ No NaN or infinite values\n")
@@ -362,7 +398,7 @@ class PiZeroSFTDataset(torch.utils.data.Dataset):
     {
         "observation.state": torch.Tensor,  # [state_dim]
         "action": torch.Tensor,             # [action_dim]
-        "observation.images.image": torch.Tensor,  # [3, H, W]
+        "observation.images.top": torch.Tensor,  # [3, H, W]
         "task": str,                        # Task instruction
         "episode_index": int,               # Episode ID (for debugging)
         "frame_index": int,                 # Frame ID within episode
@@ -391,24 +427,21 @@ class PiZeroSFTDatasetBuilder:
     
     def __init__(self, 
                  data_configs: List[Dict[str, Any]], 
-                 image_key: str = "observation.images.image",
+                 image_key: str = "observation.images.top",
                  apply_action_filter: bool = True,
-                 success_threshold: int = 6,
                  compute_stats: bool = True,
-                 normalization_mapping: Dict[str, NormalizationMode] = None):
+                 normalization_mapping: Optional[Dict[str, NormalizationMode]] = None):
         """
         Args:
             data_configs: List of data source configs
             image_key: Key name for images in the output dataset
             apply_action_filter: Whether to filter small actions
-            success_threshold: Number of consecutive successes before truncating episode
             compute_stats: Whether to compute dataset statistics for normalization
             normalization_mapping: Dict mapping modality types to normalization modes
         """
         self.data_configs = data_configs
         self.image_key = image_key
         self.apply_action_filter = apply_action_filter
-        self.success_threshold = success_threshold
         self.compute_stats = compute_stats
         self.to_tensor = transforms.ToTensor()
         
@@ -457,24 +490,7 @@ class PiZeroSFTDatasetBuilder:
             images = images[mask]
             num_filtered = mask.shape[0] - mask.sum()
             print(f"Filtered {num_filtered}/{mask.shape[0]} actions from {episode_path}")
-        
-        # Handle success-based episode truncation (if info available)
-        if "info" in data:
-            success_count = 0
-            truncate_idx = len(actions)
-            for i in range(len(actions)):
-                if data["info"][i].get("success", False):
-                    success_count += 1
-                else:
-                    success_count = 0
-                
-                if success_count >= self.success_threshold:
-                    truncate_idx = i + 1
-                    break
-            
-            actions = actions[:truncate_idx]
-            states = states[:truncate_idx]
-            images = images[:truncate_idx]
+    
         
         # Build flat samples (one per timestep)
         flat_samples = []
@@ -517,11 +533,11 @@ class PiZeroSFTDatasetBuilder:
         return flat_samples, num_filtered, episode_states, episode_actions, episode_images
     
     def build_dataset(self, 
-                     output_dir: str,
+                     output_dir: str, 
+                     task_name: str,
                      dataset_name: str = "pi_zero_sft_dataset", 
                      train_episodes: int = 70, 
-                     val_episodes: int = 5,
-                     spare_episodes: int = 5) -> Dict[str, Any]:
+                     val_episodes: int = 5) -> Dict[str, Any]:
         """
         Build the complete flat dataset with train/val splits.
         
@@ -530,12 +546,11 @@ class PiZeroSFTDatasetBuilder:
             dataset_name: Base name for output files (without extension)
             train_episodes: Number of episodes for training
             val_episodes: Number of episodes for validation  
-            spare_episodes: Number of episodes to hold out
         """
         
         # Create output directory
-        output_dir = Path(output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
+        output_dir_path = Path(output_dir)
+        output_dir_path.mkdir(parents=True, exist_ok=True)
         
         # Collect all episode files
         all_files = []
@@ -550,13 +565,28 @@ class PiZeroSFTDatasetBuilder:
                 files = sorted(glob.glob(str(path / "*.npy")))
             
             print(f"Found {len(files)} files in {path}")
+            if len(files)==0:
+                raise ValueError(f"Zero files found under {path}. ")
             
-            # Reserve some episodes and split train/val
-            if spare_episodes > 0:
-                files = files[:-spare_episodes]
-            
-            train_files = files[:train_episodes]
-            val_files = files[train_episodes:train_episodes + val_episodes]
+            # Check if we have enough files for both train and val
+            total_requested = train_episodes + val_episodes
+            if len(files) < total_requested:
+                print(f"WARNING: Requested {total_requested} episodes ({train_episodes} train + {val_episodes} val), but only {len(files)} files available!")
+                
+                # Adjust split to maintain ratio while using all available files
+                train_ratio = train_episodes / total_requested
+                val_ratio = val_episodes / total_requested
+                
+                adjusted_train = int(len(files) * train_ratio)
+                adjusted_val = len(files) - adjusted_train
+                
+                print(f"Auto-adjusting to {adjusted_train} train + {adjusted_val} val episodes to use all available data and keep the ratio of train/val. ")
+                
+                train_files = files[:adjusted_train]
+                val_files = files[adjusted_train:adjusted_train + adjusted_val]
+            else:
+                train_files = files[:train_episodes]
+                val_files = files[train_episodes:train_episodes + val_episodes]
             
             print(f"Using {len(train_files)} train, {len(val_files)} val episodes from {path}")
             
@@ -611,7 +641,11 @@ class PiZeroSFTDatasetBuilder:
             
             # Save normalization statistics separately
             stats_files = save_normalization_stats(
-                dataset_stats, output_dir, f"{dataset_name}_normalization", self.normalization_mapping
+                stats=dataset_stats, 
+                output_dir=output_dir_path, 
+                task_name=task_name, 
+                filename=f"{dataset_name}_normalization", 
+                normalization_mapping=self.normalization_mapping
             )
         
         # Create PyTorch datasets
@@ -636,7 +670,7 @@ class PiZeroSFTDatasetBuilder:
         }
         
         # Save dataset
-        dataset_file = output_dir / f"{dataset_name}.pt"
+        dataset_file = output_dir_path / f"{dataset_name}.pt"
         torch.save(dataset, dataset_file)
         print(f"Saved SFT dataset to {dataset_file}")
         print(f"Train: {len(train_samples)} samples")
@@ -644,7 +678,7 @@ class PiZeroSFTDatasetBuilder:
         print(f"Total filtered actions: {total_filtered}")
         
         # Create a summary file
-        summary_file = output_dir / f"{dataset_name}_summary.txt"
+        summary_file = output_dir_path / f"{dataset_name}_summary.txt"
         with open(summary_file, 'w') as f:
             f.write(f"Pi-Zero SFT Dataset Summary\n")
             f.write("=" * 35 + "\n\n")
@@ -688,15 +722,15 @@ class PiZeroSFTDatasetBuilder:
 
 def create_pi_zero_sft_dataset(
     data_paths: List[str],
+    task_name: str="PutOnPlateInScene25Single-v1",
     output_dir: str = "./pi_zero_sft_output",
     dataset_name: str = "pi_zero_sft_dataset",
-    image_key: str = "observation.images.image",
+    image_key: str = "observation.images.top",
     train_episodes: int = 70,
     val_episodes: int = 5,
-    spare_episodes: int = 5,
     apply_filter: bool = True,
     compute_stats: bool = True,
-    normalization_mapping: Dict[str, NormalizationMode] = None
+    normalization_mapping: Optional[Dict[str, NormalizationMode]] = None
 ):
     """Main function to create the SFT dataset with configurable parameters."""
     
@@ -714,7 +748,6 @@ def create_pi_zero_sft_dataset(
         data_configs=data_configs,
         image_key=image_key,
         apply_action_filter=apply_filter,
-        success_threshold=6,
         compute_stats=compute_stats,
         normalization_mapping=normalization_mapping
     )
@@ -722,31 +755,204 @@ def create_pi_zero_sft_dataset(
     # Build and save dataset
     dataset = builder.build_dataset(
         output_dir=output_dir,
+        task_name=task_name,
         dataset_name=dataset_name,
         train_episodes=train_episodes,
         val_episodes=val_episodes,
-        spare_episodes=spare_episodes
     )
     
     return dataset
+
+
+def calculate_episode_length_stats(dataset_path: str, verbose: bool = True) -> Dict[str, Any]:
+    """
+    Calculate episode length statistics from a dataset created by PiZeroSFTDatasetBuilder.
+    
+    Args:
+        dataset_path: Path to the .pt dataset file
+        verbose: Whether to print detailed statistics
+    
+    Returns:
+        Dictionary containing episode length statistics:
+        {
+            "train": {
+                "min": int,
+                "max": int, 
+                "mean": float,
+                "std": float,
+                "median": float,
+                "total_episodes": int,
+                "total_samples": int,
+                "episode_lengths": List[int]
+            },
+            "val": {...},  # same structure as train
+            "combined": {...}  # stats for train + val combined
+        }
+    """
+    print(f"Loading dataset from {dataset_path}")
+    
+    try:
+        dataset = torch.load(dataset_path, map_location='cpu')
+    except Exception as e:
+        raise ValueError(f"Failed to load dataset from {dataset_path}: {e}")
+    
+    # Validate dataset structure
+    if not isinstance(dataset, dict) or "train" not in dataset or "val" not in dataset:
+        raise ValueError("Dataset must contain 'train' and 'val' keys")
+    
+    def analyze_split(split_name: str, split_data) -> Dict[str, Any]:
+        """Analyze episode lengths for a single split (train/val)"""
+        if hasattr(split_data, 'samples'):
+            # PiZeroSFTDataset object
+            samples = split_data.samples
+        elif isinstance(split_data, list):
+            # Direct list of samples
+            samples = split_data
+        else:
+            raise ValueError(f"Unexpected split_data type: {type(split_data)}")
+        
+        if not samples:
+            return {
+                "min": 0, "max": 0, "mean": 0.0, "std": 0.0, "median": 0.0,
+                "total_episodes": 0, "total_samples": 0, "episode_lengths": []
+            }
+        
+        # Group samples by episode_index
+        episodes = defaultdict(list)
+        for sample in samples:
+            episode_idx = sample["episode_index"]
+            episodes[episode_idx].append(sample)
+        
+        # Calculate length of each episode
+        episode_lengths = []
+        for episode_idx, episode_samples in episodes.items():
+            episode_length = len(episode_samples)
+            episode_lengths.append(episode_length)
+        
+        episode_lengths = sorted(episode_lengths)
+        
+        if not episode_lengths:
+            return {
+                "min": 0, "max": 0, "mean": 0.0, "std": 0.0, "median": 0.0,
+                "total_episodes": 0, "total_samples": 0, "episode_lengths": []
+            }
+        
+        # Calculate statistics
+        min_length = min(episode_lengths)
+        max_length = max(episode_lengths)
+        mean_length = np.mean(episode_lengths)
+        std_length = np.std(episode_lengths)
+        median_length = np.median(episode_lengths)
+        
+        return {
+            "min": min_length,
+            "max": max_length,
+            "mean": float(mean_length),
+            "std": float(std_length),
+            "median": float(median_length),
+            "total_episodes": len(episode_lengths),
+            "total_samples": len(samples),
+            "episode_lengths": episode_lengths
+        }
+    
+    # Analyze train and val splits
+    train_stats = analyze_split("train", dataset["train"])
+    val_stats = analyze_split("val", dataset["val"])
+    
+    # Calculate combined statistics
+    combined_lengths = train_stats["episode_lengths"] + val_stats["episode_lengths"]
+    if combined_lengths:
+        combined_stats = {
+            "min": min(combined_lengths),
+            "max": max(combined_lengths),
+            "mean": float(np.mean(combined_lengths)),
+            "std": float(np.std(combined_lengths)),
+            "median": float(np.median(combined_lengths)),
+            "total_episodes": len(combined_lengths),
+            "total_samples": train_stats["total_samples"] + val_stats["total_samples"],
+            "episode_lengths": sorted(combined_lengths)
+        }
+    else:
+        combined_stats = {
+            "min": 0, "max": 0, "mean": 0.0, "std": 0.0, "median": 0.0,
+            "total_episodes": 0, "total_samples": 0, "episode_lengths": []
+        }
+    
+    results = {
+        "train": train_stats,
+        "val": val_stats,
+        "combined": combined_stats
+    }
+    
+    if verbose:
+        print("\n" + "="*60)
+        print("EPISODE LENGTH STATISTICS")
+        print("="*60)
+        
+        for split_name, stats in results.items():
+            if split_name == "combined":
+                print(f"\n{split_name.upper()} (Train + Val):")
+            else:
+                print(f"\n{split_name.upper()}:")
+            print(f"  Total Episodes: {stats['total_episodes']}")
+            print(f"  Total Samples:  {stats['total_samples']}")
+            print(f"  Min Length:     {stats['min']}")
+            print(f"  Max Length:     {stats['max']}")
+            print(f"  Mean Length:    {stats['mean']:.2f}")
+            print(f"  Std Length:     {stats['std']:.2f}")
+            print(f"  Median Length:  {stats['median']:.2f}")
+            
+            # Show distribution
+            if stats['episode_lengths']:
+                lengths = stats['episode_lengths']
+                print(f"  Length Distribution:")
+                print(f"    25th percentile: {np.percentile(lengths, 25):.1f}")
+                print(f"    75th percentile: {np.percentile(lengths, 75):.1f}")
+                print(f"    95th percentile: {np.percentile(lengths, 95):.1f}")
+                
+                # Show first few and last few lengths
+                if len(lengths) > 10:
+                    print(f"  First 5 lengths: {lengths[:5]}")
+                    print(f"  Last 5 lengths:  {lengths[-5:]}")
+                else:
+                    print(f"  All lengths: {lengths}")
+        
+        # Recommendations for multi-step training
+        print("\n" + "="*60)
+        print("RECOMMENDATIONS FOR MULTI-STEP TRAINING")
+        print("="*60)
+        min_length = combined_stats['min']
+        print(f"Maximum safe horizon_steps: {min_length}")
+        print(f"Recommended horizon_steps for 100% data usage: {min_length}")
+        print(f"Recommended horizon_steps for 95% data usage: {int(np.percentile(combined_stats['episode_lengths'], 5))}")
+        print(f"Recommended horizon_steps for 90% data usage: {int(np.percentile(combined_stats['episode_lengths'], 10))}")
+        
+        # Show how many episodes would be lost with different horizon_steps
+        print(f"\nData retention with different horizon_steps:")
+        for horizon in [1, 5, 10, 15, 20, 25, 30, 50]:
+            valid_episodes = sum(1 for length in combined_stats['episode_lengths'] if length >= horizon)
+            retention_pct = (valid_episodes / combined_stats['total_episodes']) * 100 if combined_stats['total_episodes'] > 0 else 0
+            print(f"  horizon_steps={horizon:2d}: {valid_episodes:3d}/{combined_stats['total_episodes']:3d} episodes ({retention_pct:.1f}%)")
+    
+    return results
 
 
 def main():
     parser = argparse.ArgumentParser(description="Create pi-zero SFT compatible dataset from episode files")
     parser.add_argument("--data_paths", nargs="+", required=True,
                         help="Paths to directories containing episode .npz files")
+    parser.add_argument("--task_name", required=True,
+                        help="Name of the dataset's task")
     parser.add_argument("--output_dir", default="./pi_zero_sft_output",
                         help="Output directory for all generated files")
     parser.add_argument("--dataset_name", default="pi_zero_sft_dataset",
                         help="Base name for output files (without extension)")
-    parser.add_argument("--image_key", default="observation.images.image",
+    parser.add_argument("--image_key", default="observation.images.top",
                         help="Key name for images (must match pi-zero config)")
     parser.add_argument("--train_episodes", type=int, default=70,
                         help="Number of episodes for training")
     parser.add_argument("--val_episodes", type=int, default=5,
                         help="Number of episodes for validation")
-    parser.add_argument("--spare_episodes", type=int, default=5,
-                        help="Number of episodes to hold out")
     parser.add_argument("--no_filter", action="store_true",
                         help="Disable action filtering")
     parser.add_argument("--no_stats", action="store_true",
@@ -760,7 +966,23 @@ def main():
     parser.add_argument("--visual_norm", choices=["MEAN_STD", "MIN_MAX", "IDENTITY"], 
                         default="IDENTITY", help="Normalization mode for images")
     
+    # Add argument for episode length analysis
+    parser.add_argument("--analyze_lengths", type=str, metavar="DATASET_PATH",
+                        help="Analyze episode lengths of an existing dataset file")
+    
     args = parser.parse_args()
+    
+    # Handle episode length analysis
+    if args.analyze_lengths:
+        calculate_episode_length_stats(args.analyze_lengths, verbose=True)
+        return
+    
+    # Fix data_paths parsing - handle cases where user passes with brackets/quotes
+    cleaned_paths = []
+    for path in args.data_paths:
+        # Remove brackets and quotes that might be accidentally included
+        cleaned_path = path.strip('[]').strip('"').strip("'")
+        cleaned_paths.append(cleaned_path)
     
     # Create normalization mapping
     normalization_mapping = {
@@ -770,13 +992,13 @@ def main():
     }
     
     create_pi_zero_sft_dataset(
-        data_paths=args.data_paths,
+        data_paths=cleaned_paths,
+        task_name=args.task_name,
         output_dir=args.output_dir,
         dataset_name=args.dataset_name,
         image_key=args.image_key,
         train_episodes=args.train_episodes,
         val_episodes=args.val_episodes,
-        spare_episodes=args.spare_episodes,
         apply_filter=not args.no_filter,
         compute_stats=not args.no_stats,
         normalization_mapping=normalization_mapping
@@ -784,12 +1006,15 @@ def main():
 
 
 if __name__ == "__main__":
-    if len(os.sys.argv) == 1:
-        # Default behavior for backward compatibility
+    if len(sys.argv) == 1:    # when you run python episode2dataset_sft_style.py without overloading parameters:
+        # Default behavior
         create_pi_zero_sft_dataset(
             data_paths=["/nvme_data/tonghe/RL4VLA/ManiSkill/mp_collect/PutOnPlateInScene25Single-v1/75/data"],
-            output_dir="./pi_zero_sft_output",
-            dataset_name="pi_zero_sft_dataset"
+            task_name="PutOnPlateInScene25Single-v1",
+            output_dir="./datasets/warmup/pi0_sft/PutOnPlateInScene25Single-v1",
+            dataset_name="pi0_sft",
+            train_episodes= 70,
+            val_episodes = 5,
         )
     else:
-        main() 
+        main()

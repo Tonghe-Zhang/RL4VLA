@@ -20,6 +20,9 @@ from mani_skill.utils.structs.types import SimConfig
 from mani_skill.utils.registration import register_env
 
 CARROT_DATASET_DIR = Path(__file__).parent / ".." / ".." / ".." / ".." / "assets" / "carrot"
+#  /ManiSkill/mani_skill/assets/carrot
+#  This is folder that contains the .obj files for the objects, plates, and tables 
+#  There are 25 `carrots` (objects), 17 `plates`, and 21 `table textures`. 
 
 
 def masks_to_boxes_pytorch(masks):
@@ -190,13 +193,13 @@ class PutOnPlateInScene25(BaseEnv):
 
         # carrot
         self.objs_carrot: dict[str, Actor] = {}
-
+        
         for idx, name in enumerate(self.model_db_carrot):
             model_path = CARROT_DATASET_DIR / "more_carrot" / name
             density = self.model_db_carrot[name].get("density", 1000)
             scale_list = self.model_db_carrot[name].get("scale", [1.0])
             bbox = self.model_db_carrot[name]["bbox"]
-
+            
             scale = self.np_random.choice(scale_list)
             pose = Pose.create_from_pq(torch.tensor([1.0, 0.3 * idx, 1.0]))
             self.objs_carrot[name] = self._build_actor_helper(name, model_path, density, scale, pose)
@@ -496,15 +499,19 @@ class PutOnPlateInScene25(BaseEnv):
         return True
 
     def get_language_instruction(self):
+        print(f"*"*25)
+        print(f"Debu info into {self.__class__.__name__}: get_language_instruction()")
         select_carrot = [self.carrot_names[idx] for idx in self.select_carrot_ids]
         select_plate = [self.plate_names[idx] for idx in self.select_plate_ids]
+        print(f"select_carrot_ids={self.select_carrot_ids}, select_carrot={select_carrot}")
+        print(f"select_plate_ids={self.select_carrot_ids}, select_plate={select_plate}")
 
         instruct = []
         for idx in range(self.num_envs):
             carrot_name = self.model_db_carrot[select_carrot[idx]]["name"]
             plate_name = self.model_db_plate[select_plate[idx]]["name"]
             instruct.append(f"put {carrot_name} on {plate_name}")
-
+            print(f"idx={idx}, append instruction {instruct[-1]}")
         return instruct
 
     def _after_reconfigure(self, options: dict):
@@ -605,15 +612,15 @@ class PutOnPlateInScene25(BaseEnv):
 class PutOnPlateInScene25MainV3(PutOnPlateInScene25):
     def __init__(self, **kwargs):
         self._prep_init()
-
+        # for debug:        
         super().__init__(**kwargs)
 
     def _prep_init(self):
-        # models
+        # models. here, `db` is for `database`
         self.model_db_carrot: dict[str, dict] = io_utils.load_json(
             CARROT_DATASET_DIR / "more_carrot" / "model_db.json"
         )
-        assert len(self.model_db_carrot) == 25
+        assert len(self.model_db_carrot) == 25 # 25 carrots
 
         self.model_db_plate: dict[str, dict] = io_utils.load_json(
             CARROT_DATASET_DIR / "more_plate" / "model_db.json"
@@ -649,9 +656,12 @@ class PutOnPlateInScene25MainV3(PutOnPlateInScene25):
         assert len(self.overlay_mix_numpy) == 21
 
     def _initialize_episode_pre(self, env_idx: torch.Tensor, options: dict):
+        """
+        The `options` is passed from env.reset()
+        """
         # NOTE: this part of code is not GPU parallelized
-        b = len(env_idx)
-        assert b == self.num_envs
+        n_envs_to_reset = len(env_idx)
+        assert n_envs_to_reset == self.num_envs    # wait but then this line will forbid partial reset. 
 
         obj_set = options.get("obj_set", "train")
         if obj_set == "train":
@@ -676,11 +686,18 @@ class PutOnPlateInScene25MainV3(PutOnPlateInScene25):
         l1 = len(self.xyz_configs)
         l2 = len(self.quat_configs)
         ltt = lc * lp * lo * l1 * l2
+        
+        # ltt: length of the total 
+        # lc: length of the carrot set
+        # lp: length of the plate set
+        # lo: length of the overlay set
+        # l1: length of the position set
+        # l2: length of the quaternion set
 
         # rand and select
         episode_id = options.get("episode_id",
-                                 torch.randint(low=0, high=ltt, size=(b,), device=self.device))
-        episode_id = episode_id.reshape(b)
+                                 torch.randint(low=0, high=ltt, size=(n_envs_to_reset,), device=self.device))
+        episode_id = episode_id.reshape(n_envs_to_reset)
         episode_id = episode_id % ltt
 
         self.select_carrot_ids = episode_id // (lp * lo * l1 * l2) + lc_offset  # [b]
@@ -688,7 +705,21 @@ class PutOnPlateInScene25MainV3(PutOnPlateInScene25):
         self.select_overlay_ids = (episode_id // (l1 * l2)) % lo + lo_offset
         self.select_pos_ids = (episode_id // l2) % l1
         self.select_quat_ids = episode_id % l2
-
+        # for debugging:
+        print(f"*"*20)
+        print(f"Environment debug info in {self.__class__.__name__}, self.num_envs={self.num_envs}")
+        print(f"We support len(self.plate_names)={len(self.plate_names)}, len(self.xyz_configs)={len(self.xyz_configs)}, len(self.quat_configs)={len(self.quat_configs)}")
+        print(f"episode_id={episode_id}")
+        print(f"carrot_names={self.carrot_names}")
+        print(f"plate_names={self.plate_names}")
+        print(f"select_carrot_ids={self.select_carrot_ids}")
+        print(f"select_plate_ids={self.select_plate_ids}")
+        print(f"select_overlay_ids={self.select_overlay_ids}")
+        print(f"select_pos_ids={self.select_pos_ids}")
+        print(f"select_quat_ids={self.select_quat_ids}")
+        print(f"End of debug, quitting program.")
+        print(f"*"*20)
+        
     def _generate_init_pose(self):
         xy_center = np.array([-0.16, 0.00]).reshape(1, 2)
         half_edge_length = np.array([0.075, 0.075]).reshape(1, 2)
@@ -732,6 +763,10 @@ class PutOnPlateInScene25MainV3(PutOnPlateInScene25):
 
 @register_env("PutOnPlateInScene25Single-v1", max_episode_steps=80, asset_download_ids=["bridge_v2_real2sim"])
 class PutOnPlateInScene25Single(PutOnPlateInScene25MainV3):
+    """
+    This environment places at most 25 different carrots on the same type of plate. 
+    
+    """
     def _prep_init(self):
         # models
         self.model_db_carrot: dict[str, dict] = io_utils.load_json(
@@ -1262,7 +1297,7 @@ class PutOnPlateInScene25VisionWhole03(PutOnPlateInScene25MainV3):
 
     def _initialize_episode_pre(self, env_idx: torch.Tensor, options: dict):
         # NOTE: this part of code is not GPU parallelized
-        b = len(env_idx)
+        b = len(env_idx)   # number of environments that will be reset. 
         assert b == self.num_envs
 
         obj_set = options.get("obj_set", "train")
@@ -1917,6 +1952,9 @@ class PutOnPlateInScene25MultiCarrot(PutOnPlateInScene25MainV3):
 
 @register_env("PutOnPlateInScene25MultiPlate-v1", max_episode_steps=80, asset_download_ids=["bridge_v2_real2sim"])
 class PutOnPlateInScene25MultiPlate(PutOnPlateInScene25MainV3):
+    """
+    This environment places at most 25 different carrots on at most 17 types of plates. 
+    """
     select_extra_ids: torch.Tensor
 
     def _prep_init(self):
@@ -1958,6 +1996,12 @@ class PutOnPlateInScene25MultiPlate(PutOnPlateInScene25MainV3):
         assert len(self.overlay_mix_numpy) == 21
 
     def _generate_init_pose(self):
+        """
+        This function generates the initial pose for the carrots and plates, 
+        which includes 36 positions and 4 orientations. 
+        The positions are evenly distributed in a 6x6 grid, and the orientations are evenly distributed in a 4x4 grid. 
+        The positions are relative to the center of the plate, and the orientations are relative to the z-axis. 
+        """
         xy_center = np.array([-0.16, 0.00]).reshape(1, 2)
         half_edge_length = np.array([0.075, 0.075]).reshape(1, 2)
 

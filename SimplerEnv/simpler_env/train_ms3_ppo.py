@@ -28,7 +28,10 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 class Args:
     env_id: Annotated[str, tyro.conf.arg(aliases=["-e"])] = "PutCarrotOnPlateInScene-v1"
     """The environment ID of the task you want to simulate. Can be one of
-    PutCarrotOnPlateInScene-v1, PutSpoonOnTableClothInScene-v1, StackGreenCubeOnYellowCubeBakedTexInScene-v1, PutEggplantInBasketScene-v1"""
+    PutCarrotOnPlateInScene-v1, 
+    PutSpoonOnTableClothInScene-v1, 
+    StackGreenCubeOnYellowCubeBakedTexInScene-v1, 
+    PutEggplantInBasketScene-v1"""
 
     """Number of environments to run. With more than 1 environment the environment will use the GPU backend 
     which runs faster enabling faster large-scale evaluations. Note that the overall behavior of the simulation
@@ -152,7 +155,7 @@ class Runner:
 
     def collect(self):
         self.policy.prep_rollout()
-
+        
         obs_image = self.buffer.obs[self.buffer.step]
         obs_image = torch.tensor(obs_image).to(self.device)
         obs = dict(image=obs_image, task_description=self.buffer.instruction)

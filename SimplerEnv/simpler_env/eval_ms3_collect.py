@@ -36,7 +36,7 @@ class Args:
 
     max_episode_len: int = 80
     """Max episode length"""
-
+    
     record_dir: str = "octo_collect"
     """The directory to save videos and results"""
 
@@ -73,7 +73,7 @@ def main():
         sensor_configs={"shader_pack": "default"},
     )
     sim_backend = 'gpu' if env.device.type == 'cuda' else 'cpu'
-
+    
     from simpler_env.policies.octo.octo_model import OctoInference
     model = OctoInference(model_type="octo-small", policy_setup="widowx_bridge", init_rng=args.seed, action_scale=1)
 
@@ -106,7 +106,7 @@ def main():
         obs_image = obs["sensor_data"]["3rd_view_camera"]["rgb"].to(torch.uint8) # on cuda:0
         instruction = env.unwrapped.get_language_instruction()
         model.reset(instruction)
-
+        
         print("instruction[0]:", instruction[0])
 
         # data dump: instruction

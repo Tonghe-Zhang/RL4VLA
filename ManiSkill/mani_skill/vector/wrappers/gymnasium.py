@@ -25,12 +25,15 @@ class ManiSkillVectorEnv(VectorEnv):
         env_kwargs: Environment kwargs to pass to gym.make. This is only used if the env argument is a string
         auto_reset (bool): Whether this wrapper will auto reset the environment (following the same API/conventions as Gymnasium).
             Default is True (recommended as most ML/RL libraries use auto reset)
-        ignore_terminations (bool): Whether this wrapper ignores terminations when deciding when to auto reset. Terminations can be caused by
-            the task reaching a success or fail state as defined in a task's evaluation function. Default is False, meaning there is early stop in
-            episode rollouts. If set to True, this would generally for situations where you may want to model a task as infinite horizon where a task
-            stops only due to the timelimit.
+        ignore_terminations (bool): Whether this wrapper ignores terminations when deciding when to auto reset. 
+            Terminations can be caused by the task reaching a success or fail state as defined in a 
+            task's evaluation function. 
+            Default is False, meaning there is early stop in episode rollouts. 
+            If set to True, this would generally for situations where you may want to model a task 
+            as infinite horizon where a task stops only due to the timelimit.
         record_metrics (bool): If True, the returned info objects will contain the metrics: return, length, success_once, success_at_end, fail_once, fail_at_end.
-            success/fail metrics are recorded only when the environment has success/fail criteria. success/fail_at_end are recorded only when ignore_terminations is True.
+            success/fail metrics are recorded only when the environment has success/fail criteria. 
+            success/fail_at_end are recorded only when ignore_terminations is True.
     """
 
     def __init__(
@@ -94,7 +97,7 @@ class ManiSkillVectorEnv(VectorEnv):
         if "env_idx" in options:
             env_idx = options["env_idx"]
             mask = torch.zeros(self.num_envs, dtype=bool, device=self.base_env.device)
-            mask[env_idx] = True
+            mask[env_idx] = True    # supporting partial reset. 
             if self.record_metrics:
                 self.success_once[mask] = False
                 self.fail_once[mask] = False
@@ -143,9 +146,10 @@ class ManiSkillVectorEnv(VectorEnv):
 
         if dones.any() and self.auto_reset:
             final_obs = torch_clone_dict(obs)
-            env_idx = torch.arange(0, self.num_envs, device=self.device)[dones]
+            # this is a partial reset logic, and env_idx here only includes those envs that have a done flag. 
+            done_env_idx = torch.arange(0, self.num_envs, device=self.device)[dones]
             final_info = torch_clone_dict(infos)
-            obs, infos = self.reset(options=dict(env_idx=env_idx))
+            obs, infos = self.reset(options=dict(env_idx=done_env_idx))
             # gymnasium calls it final observation but it really is just o_{t+1} or the true next observation
             infos["final_observation"] = final_obs
             infos["final_info"] = final_info

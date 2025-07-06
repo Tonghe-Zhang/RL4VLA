@@ -100,7 +100,7 @@ class BaseEnv(gym.Env):
 
         render_backend (str): By default this is "gpu". If render_backend is "gpu", then we auto select a GPU to render with.
             It can be "cuda:n" where n is the ID of the GPU to render with. If this is "cpu", then we render on the CPU.
-
+        
         parallel_in_single_scene (bool): By default this is False. If True, rendered images and the GUI will show all objects in one view.
             This is only really useful for generating cool videos showing all environments at once but it is not recommended
             otherwise as it slows down simulation and rendering.
@@ -814,7 +814,8 @@ class BaseEnv(gym.Env):
         if "env_idx" in options:
             env_idx = options["env_idx"]
             if len(env_idx) != self.num_envs and reconfigure:
-                raise RuntimeError("Cannot do a partial reset and reconfigure the environment. You must do one or the other.")
+                raise RuntimeError("Cannot do a partial reset and reconfigure the environment. \
+                                   You must do one or the other.")
         else:
             env_idx = torch.arange(0, self.num_envs, device=self.device)
 

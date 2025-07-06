@@ -5,7 +5,7 @@ import os
 import jax
 import matplotlib.pyplot as plt
 import numpy as np
-from octo.model.octo_model import OctoModel
+from octo.octo.model.octo_model import OctoModel
 from functools import partial
 from simpler_env.policies.octo.action_ensemble import ActionEnsembler
 from mani_skill.utils.geometry import rotation_conversions
@@ -156,7 +156,7 @@ class OctoInference:
             if task_description != self.task_description:
                 # task description has changed; reset the policy state
                 self.reset(task_description)
-
+        
         # assert image.dtype == np.uint8
         assert len(image.shape) == 4, "image shape should be (batch_size, height, width, 3)"
         batch_size = image.shape[0]
