@@ -688,11 +688,7 @@ class PutOnPlateInScene25MainV3(PutOnPlateInScene25):
         The `options` is passed from env.reset()
         In autoreset, env_idx are the real environment ids that will be autoreset, 
         whose values are in [0, num_envs-1]
-        """
-        # NOTE: this part of code is not GPU parallelized
-        n_envs_to_reset = len(env_idx)
-        assert n_envs_to_reset == self.num_envs    # this one is wierd.
-        
+        """        
         obj_set = options.get("obj_set", "train")
         if obj_set == "train":
             lc = 16
@@ -724,12 +720,35 @@ class PutOnPlateInScene25MainV3(PutOnPlateInScene25):
         # l1: length of the position set
         # l2: length of the quaternion set
 
+        ############################################################################################################
+        ######### Partial Reset, Revised by Tonghe on 07/13/2025 ###################################################
+        num_envs_to_reset = len(env_idx)
         # rand and select
-        episode_id = options.get("episode_id",
-                                 torch.randint(low=0, high=ltt, size=(n_envs_to_reset,), device=self.device))
-        episode_id = episode_id.reshape(n_envs_to_reset)
-        episode_id = episode_id % ltt
-
+        # Synchronized reset:
+        if len(env_idx) == self.num_envs:
+            episode_id = options.get("episode_id",
+                                    torch.randint(low=0, high=ltt, size=(self.num_envs,), device=self.device))
+            episode_id = episode_id.reshape(self.num_envs)
+            episode_id = episode_id % ltt
+        elif 0< len(env_idx) and len(env_idx) < self.num_envs:
+            # Asynchronous (partial) reset
+            # env_idx are the ids of environments to be reset. 
+            # When there is a done env, env_idx is not empty. 
+            # Generate random integers within (0,ltt) at those coordinates in list env_idx (which should be reset)
+            # and keep the episode_id the same as before (queried from self.episode_id) at other coordinates 
+            episode_id = self.episode_id.clone()
+            reset_env_ids = torch.tensor(env_idx, device=self.device, dtype=torch.long)
+            # Use the environment's proper RNG instead of global torch.randint. 
+            # Warning: if you use the same seed during reset, each environment will always reset to the same scene, which correspond to the same episode_id. 
+            # To add diversity, you can pass different (however, reproducible) seeds during reset, like, increase the base_seed by 1 for each manual reset at the start of a new parallel rollout. 
+            reset_episode_id_vals = torch.randint(0, ltt, (num_envs_to_reset,), device=self.device)
+            episode_id[reset_env_ids] = reset_episode_id_vals
+            episode_id = episode_id.reshape(self.num_envs)
+            print(f"|Execute partial reset| with env_idx={env_idx}, reset_episode_id_vals={reset_episode_id_vals}: episode_id={episode_id}")
+         # update and store episode_id for each env
+        self.episode_id: torch.Tensor = episode_id
+        ############################################################################################################
+        
         self.select_carrot_ids = episode_id // (lp * lo * l1 * l2) + lc_offset  # [b]
         self.select_plate_ids = (episode_id // (lo * l1 * l2)) % lp
         self.select_overlay_ids = (episode_id // (l1 * l2)) % lo + lo_offset
@@ -843,9 +862,6 @@ class PutOnPlateInScene25Single(PutOnPlateInScene25MainV3):
         assert len(self.overlay_mix_numpy) == 1
 
     def _initialize_episode_pre(self, env_idx: torch.Tensor, options: dict):
-        # NOTE: this part of code is not GPU parallelized
-        b = len(env_idx)
-        assert b == self.num_envs
 
         obj_set = options.get("obj_set", "train")
         if obj_set == "train":
@@ -867,11 +883,34 @@ class PutOnPlateInScene25Single(PutOnPlateInScene25MainV3):
         l2 = len(self.quat_configs)
         ltt = lc * lp * lo * l1 * l2
 
+        ############################################################################################################
+        ######### Partial Reset, Revised by Tonghe on 07/13/2025 ###################################################
+        num_envs_to_reset = len(env_idx)
         # rand and select
-        episode_id = options.get("episode_id",
-                                 torch.randint(low=0, high=ltt, size=(b,), device=self.device))
-        episode_id = episode_id.reshape(b)
-        episode_id = episode_id % ltt
+        # Synchronized reset:
+        if len(env_idx) == self.num_envs:
+            episode_id = options.get("episode_id",
+                                    torch.randint(low=0, high=ltt, size=(self.num_envs,), device=self.device))
+            episode_id = episode_id.reshape(self.num_envs)
+            episode_id = episode_id % ltt
+        elif 0< len(env_idx) and len(env_idx) < self.num_envs:
+            # Asynchronous (partial) reset
+            # env_idx are the ids of environments to be reset. 
+            # When there is a done env, env_idx is not empty. 
+            # Generate random integers within (0,ltt) at those coordinates in list env_idx (which should be reset)
+            # and keep the episode_id the same as before (queried from self.episode_id) at other coordinates 
+            episode_id = self.episode_id.clone()
+            reset_env_ids = torch.tensor(env_idx, device=self.device, dtype=torch.long)
+            # Use the environment's proper RNG instead of global torch.randint. 
+            # Warning: if you use the same seed during reset, each environment will always reset to the same scene, which correspond to the same episode_id. 
+            # To add diversity, you can pass different (however, reproducible) seeds during reset, like, increase the base_seed by 1 for each manual reset at the start of a new parallel rollout. 
+            reset_episode_id_vals = torch.randint(0, ltt, (num_envs_to_reset,), device=self.device)
+            episode_id[reset_env_ids] = reset_episode_id_vals
+            episode_id = episode_id.reshape(self.num_envs)
+            print(f"|Execute partial reset| with env_idx={env_idx}, reset_episode_id_vals={reset_episode_id_vals}: episode_id={episode_id}")
+         # update and store episode_id for each env
+        self.episode_id: torch.Tensor = episode_id
+        ############################################################################################################
 
         self.select_carrot_ids = episode_id // (lp * lo * l1 * l2) + lc_offset  # [b]
         self.select_plate_ids = (episode_id // (lo * l1 * l2)) % lp
@@ -883,9 +922,6 @@ class PutOnPlateInScene25Single(PutOnPlateInScene25MainV3):
 @register_env("PutOnPlateInScene25MainCarrot-v3", max_episode_steps=80, asset_download_ids=["bridge_v2_real2sim"])
 class PutOnPlateInScene25MainCarrotV3(PutOnPlateInScene25MainV3):
     def _initialize_episode_pre(self, env_idx: torch.Tensor, options: dict):
-        # NOTE: this part of code is not GPU parallelized
-        b = len(env_idx)
-        assert b == self.num_envs
 
         obj_set = options.get("obj_set", "train")
         if obj_set == "train":
@@ -907,11 +943,34 @@ class PutOnPlateInScene25MainCarrotV3(PutOnPlateInScene25MainV3):
         l2 = len(self.quat_configs)
         ltt = lc * lp * lo * l1 * l2
 
+        ############################################################################################################
+        ######### Partial Reset, Revised by Tonghe on 07/13/2025 ###################################################
+        num_envs_to_reset = len(env_idx)
         # rand and select
-        episode_id = options.get("episode_id",
-                                 torch.randint(low=0, high=ltt, size=(b,), device=self.device))
-        episode_id = episode_id.reshape(b)
-        episode_id = episode_id % ltt
+        # Synchronized reset:
+        if len(env_idx) == self.num_envs:
+            episode_id = options.get("episode_id",
+                                    torch.randint(low=0, high=ltt, size=(self.num_envs,), device=self.device))
+            episode_id = episode_id.reshape(self.num_envs)
+            episode_id = episode_id % ltt
+        elif 0< len(env_idx) and len(env_idx) < self.num_envs:
+            # Asynchronous (partial) reset
+            # env_idx are the ids of environments to be reset. 
+            # When there is a done env, env_idx is not empty. 
+            # Generate random integers within (0,ltt) at those coordinates in list env_idx (which should be reset)
+            # and keep the episode_id the same as before (queried from self.episode_id) at other coordinates 
+            episode_id = self.episode_id.clone()
+            reset_env_ids = torch.tensor(env_idx, device=self.device, dtype=torch.long)
+            # Use the environment's proper RNG instead of global torch.randint. 
+            # Warning: if you use the same seed during reset, each environment will always reset to the same scene, which correspond to the same episode_id. 
+            # To add diversity, you can pass different (however, reproducible) seeds during reset, like, increase the base_seed by 1 for each manual reset at the start of a new parallel rollout. 
+            reset_episode_id_vals = torch.randint(0, ltt, (num_envs_to_reset,), device=self.device)
+            episode_id[reset_env_ids] = reset_episode_id_vals
+            episode_id = episode_id.reshape(self.num_envs)
+            print(f"|Execute partial reset| with env_idx={env_idx}, reset_episode_id_vals={reset_episode_id_vals}: episode_id={episode_id}")
+         # update and store episode_id for each env
+        self.episode_id: torch.Tensor = episode_id
+        ############################################################################################################
 
         self.select_carrot_ids = episode_id // (lp * lo * l1 * l2) + lc_offset  # [b]
         self.select_plate_ids = (episode_id // (lo * l1 * l2)) % lp
@@ -965,9 +1024,6 @@ class PutOnPlateInScene25MainImageV3(PutOnPlateInScene25MainV3):
         assert len(self.overlay_mix_numpy) == 21
 
     def _initialize_episode_pre(self, env_idx: torch.Tensor, options: dict):
-        # NOTE: this part of code is not GPU parallelized
-        b = len(env_idx)
-        assert b == self.num_envs
 
         obj_set = options.get("obj_set", "train")
         if obj_set == "train":
@@ -989,11 +1045,34 @@ class PutOnPlateInScene25MainImageV3(PutOnPlateInScene25MainV3):
         l2 = len(self.quat_configs)
         ltt = lc * lp * lo * l1 * l2
 
+        ############################################################################################################
+        ######### Partial Reset, Revised by Tonghe on 07/13/2025 ###################################################
+        num_envs_to_reset = len(env_idx)
         # rand and select
-        episode_id = options.get("episode_id",
-                                 torch.randint(low=0, high=ltt, size=(b,), device=self.device))
-        episode_id = episode_id.reshape(b)
-        episode_id = episode_id % ltt
+        # Synchronized reset:
+        if len(env_idx) == self.num_envs:
+            episode_id = options.get("episode_id",
+                                    torch.randint(low=0, high=ltt, size=(self.num_envs,), device=self.device))
+            episode_id = episode_id.reshape(self.num_envs)
+            episode_id = episode_id % ltt
+        elif 0< len(env_idx) and len(env_idx) < self.num_envs:
+            # Asynchronous (partial) reset
+            # env_idx are the ids of environments to be reset. 
+            # When there is a done env, env_idx is not empty. 
+            # Generate random integers within (0,ltt) at those coordinates in list env_idx (which should be reset)
+            # and keep the episode_id the same as before (queried from self.episode_id) at other coordinates 
+            episode_id = self.episode_id.clone()
+            reset_env_ids = torch.tensor(env_idx, device=self.device, dtype=torch.long)
+            # Use the environment's proper RNG instead of global torch.randint. 
+            # Warning: if you use the same seed during reset, each environment will always reset to the same scene, which correspond to the same episode_id. 
+            # To add diversity, you can pass different (however, reproducible) seeds during reset, like, increase the base_seed by 1 for each manual reset at the start of a new parallel rollout. 
+            reset_episode_id_vals = torch.randint(0, ltt, (num_envs_to_reset,), device=self.device)
+            episode_id[reset_env_ids] = reset_episode_id_vals
+            episode_id = episode_id.reshape(self.num_envs)
+            print(f"|Execute partial reset| with env_idx={env_idx}, reset_episode_id_vals={reset_episode_id_vals}: episode_id={episode_id}")
+         # update and store episode_id for each env
+        self.episode_id: torch.Tensor = episode_id
+        ############################################################################################################
 
         self.select_carrot_ids = episode_id // (lp * lo * l1 * l2) + lc_offset  # [b]
         self.select_plate_ids = (episode_id // (lo * l1 * l2)) % lp
@@ -1007,9 +1086,6 @@ class PutOnPlateInScene25MainImageV3(PutOnPlateInScene25MainV3):
 @register_env("PutOnPlateInScene25VisionImage-v1", max_episode_steps=80, asset_download_ids=["bridge_v2_real2sim"])
 class PutOnPlateInScene25VisionImage(PutOnPlateInScene25MainV3):
     def _initialize_episode_pre(self, env_idx: torch.Tensor, options: dict):
-        # NOTE: this part of code is not GPU parallelized
-        b = len(env_idx)
-        assert b == self.num_envs
 
         obj_set = options.get("obj_set", "train")
         if obj_set == "train":
@@ -1031,11 +1107,34 @@ class PutOnPlateInScene25VisionImage(PutOnPlateInScene25MainV3):
         l2 = len(self.quat_configs)
         ltt = lc * lp * lo * l1 * l2
 
+        ############################################################################################################
+        ######### Partial Reset, Revised by Tonghe on 07/13/2025 ###################################################
+        num_envs_to_reset = len(env_idx)
         # rand and select
-        episode_id = options.get("episode_id",
-                                 torch.randint(low=0, high=ltt, size=(b,), device=self.device))
-        episode_id = episode_id.reshape(b)
-        episode_id = episode_id % ltt
+        # Synchronized reset:
+        if len(env_idx) == self.num_envs:
+            episode_id = options.get("episode_id",
+                                    torch.randint(low=0, high=ltt, size=(self.num_envs,), device=self.device))
+            episode_id = episode_id.reshape(self.num_envs)
+            episode_id = episode_id % ltt
+        elif 0< len(env_idx) and len(env_idx) < self.num_envs:
+            # Asynchronous (partial) reset
+            # env_idx are the ids of environments to be reset. 
+            # When there is a done env, env_idx is not empty. 
+            # Generate random integers within (0,ltt) at those coordinates in list env_idx (which should be reset)
+            # and keep the episode_id the same as before (queried from self.episode_id) at other coordinates 
+            episode_id = self.episode_id.clone()
+            reset_env_ids = torch.tensor(env_idx, device=self.device, dtype=torch.long)
+            # Use the environment's proper RNG instead of global torch.randint. 
+            # Warning: if you use the same seed during reset, each environment will always reset to the same scene, which correspond to the same episode_id. 
+            # To add diversity, you can pass different (however, reproducible) seeds during reset, like, increase the base_seed by 1 for each manual reset at the start of a new parallel rollout. 
+            reset_episode_id_vals = torch.randint(0, ltt, (num_envs_to_reset,), device=self.device)
+            episode_id[reset_env_ids] = reset_episode_id_vals
+            episode_id = episode_id.reshape(self.num_envs)
+            print(f"|Execute partial reset| with env_idx={env_idx}, reset_episode_id_vals={reset_episode_id_vals}: episode_id={episode_id}")
+         # update and store episode_id for each env
+        self.episode_id: torch.Tensor = episode_id
+        ############################################################################################################
 
         self.select_carrot_ids = episode_id // (lp * lo * l1 * l2) + lc_offset  # [b]
         self.select_plate_ids = (episode_id // (lo * l1 * l2)) % lp
@@ -1051,9 +1150,6 @@ class PutOnPlateInScene25VisionTexture03(PutOnPlateInScene25MainV3):
     overlay_texture_mix_ratio = 0.3
 
     def _initialize_episode_pre(self, env_idx: torch.Tensor, options: dict):
-        ######### Partial Reset, Revised by Tonghe on 07/13/2025 ###################################################
-        num_envs_to_reset = len(env_idx)
-        ############################################################################################################
         obj_set = options.get("obj_set", "train")
         if obj_set == "train":
             le = 1
@@ -1077,7 +1173,8 @@ class PutOnPlateInScene25VisionTexture03(PutOnPlateInScene25MainV3):
         ltt = lc * le * lp * lo * l1 * l2
 
         ############################################################################################################
-        # Partial Reset, Revised by Tonghe on 07/13/2025 ###########################################################
+        ######### Partial Reset, Revised by Tonghe on 07/13/2025 ###################################################
+        num_envs_to_reset = len(env_idx)
         # rand and select
         # Synchronized reset:
         if len(env_idx) == self.num_envs:
