@@ -820,7 +820,7 @@ class BaseEnv(gym.Env):
             env_idx = torch.arange(0, self.num_envs, device=self.device)
 
         self._set_main_rng(seed)
-
+        
         if reconfigure:
             self._set_episode_rng(seed if seed is not None else self._batched_main_rng.randint(2**31), env_idx)
             with torch.random.fork_rng():
@@ -1355,6 +1355,7 @@ class BaseEnv(gym.Env):
         print(
         "# -------------------------------------------------------------------------- #"
         )
+        
         print(
             f"Task ID: {self.spec.id}, {self.num_envs} parallel environments, sim_backend={sim_backend}"
         )

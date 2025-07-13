@@ -238,39 +238,26 @@ class PutOnPlateInScene25(BaseEnv):
     def _initialize_episode(self, env_idx: torch.Tensor, options: dict):
         self._initialize_episode_pre(env_idx, options)
         
-        # Use length of env_idx for partial reset support
-        n_envs_reset = len(env_idx)
+        # assume synchronous reset
+        b = self.num_envs
 
         # rgb overlay
         sensor = self._sensor_configs[self.rgb_camera_name]
         assert sensor.width == 640
         assert sensor.height == 480
-        
-        
-        ######### Partial Reset, Revised by Tonghe on 07/13/2025 ###################################################
-        # Handle overlay tensors for full vs partial reset - Keep full size for get_obs() method
-        overlay_images = np.stack([self.overlay_images_numpy[idx] for idx in self.select_overlay_ids[env_idx]])
-        overlay_textures = np.stack([self.overlay_textures_numpy[idx] for idx in self.select_overlay_ids[env_idx]])
-        overlay_mix = np.array([self.overlay_mix_numpy[idx] for idx in self.select_overlay_ids[env_idx]])
-        if not hasattr(self, 'overlay_images') or len(env_idx) == self.num_envs:
-            self.overlay_images = torch.zeros((self.num_envs, 480, 640, 3), device=self.device)
-        # Update only the environments being reset
-        self.overlay_images[env_idx] = torch.tensor(overlay_images, device=self.device, dtype=torch.float32)
-        if not hasattr(self, 'overlay_textures') or len(env_idx) == self.num_envs:
-            self.overlay_textures = torch.zeros((self.num_envs, 480, 640, 3), device=self.device, dtype=torch.float32)
-        # Update only the environments being reset
-        self.overlay_textures[env_idx] = torch.tensor(overlay_textures, device=self.device, dtype=torch.float32)
-        if not hasattr(self, 'overlay_mix') or len(env_idx) == self.num_envs:
-            self.overlay_mix = torch.zeros((self.num_envs,), device=self.device, dtype=torch.float32)
-        # Update only the environments being reset
-        self.overlay_mix[env_idx] = torch.tensor(overlay_mix, device=self.device, dtype=torch.float32)
-        ############################################################################################################
+        overlay_images = np.stack([self.overlay_images_numpy[idx] for idx in self.select_overlay_ids])
+        self.overlay_images = torch.tensor(overlay_images, device=self.device)  # [b, H, W, 3]
+        overlay_textures = np.stack([self.overlay_textures_numpy[idx] for idx in self.select_overlay_ids])
+        self.overlay_textures = torch.tensor(overlay_textures, device=self.device)  # [b, H, W, 3]
+        overlay_mix = np.array([self.overlay_mix_numpy[idx] for idx in self.select_overlay_ids])
+        self.overlay_mix = torch.tensor(overlay_mix, device=self.device)  # [b]
+
         # xyz and quat
         xyz_configs = torch.tensor(self.xyz_configs, device=self.device)
         quat_configs = torch.tensor(self.quat_configs, device=self.device)
 
-        select_carrot = [self.carrot_names[idx] for idx in self.select_carrot_ids[env_idx]]
-        select_plate = [self.plate_names[idx] for idx in self.select_plate_ids[env_idx]]
+        select_carrot = [self.carrot_names[idx] for idx in self.select_carrot_ids]
+        select_plate = [self.plate_names[idx] for idx in self.select_plate_ids]
         carrot_actor = [self.objs_carrot[n] for n in select_carrot]
         plate_actor = [self.objs_plate[n] for n in select_plate]
 
@@ -288,25 +275,25 @@ class PutOnPlateInScene25(BaseEnv):
 
         # set pose for objs
         for idx, name in enumerate(self.model_db_carrot):
-            is_select = self.select_carrot_ids[env_idx] == idx  # [b]
-            p_reset = torch.tensor([1.0, 0.3 * idx, 1.0], device=self.device).reshape(1, -1).repeat(n_envs_reset, 1)  # [b, 3]
-            p_select = xyz_configs[self.select_pos_ids[env_idx], 0].reshape(n_envs_reset, 3)  # [b, 3]
+            is_select = self.select_carrot_ids == idx  # [b]
+            p_reset = torch.tensor([1.0, 0.3 * idx, 1.0], device=self.device).reshape(1, -1).repeat(b, 1)  # [b, 3]
+            p_select = xyz_configs[self.select_pos_ids, 0].reshape(b, 3)  # [b, 3]
             p = torch.where(is_select.unsqueeze(1).repeat(1, 3), p_select, p_reset)  # [b, 3]
 
-            q_reset = torch.tensor([0, 0, 0, 1], device=self.device).reshape(1, -1).repeat(n_envs_reset, 1)  # [b, 4]
-            q_select = quat_configs[self.select_quat_ids[env_idx], 0].reshape(n_envs_reset, 4)  # [b, 4]
+            q_reset = torch.tensor([0, 0, 0, 1], device=self.device).reshape(1, -1).repeat(b, 1)  # [b, 4]
+            q_select = quat_configs[self.select_quat_ids, 0].reshape(b, 4)  # [b, 4]
             q = torch.where(is_select.unsqueeze(1).repeat(1, 4), q_select, q_reset)  # [b, 4]
-            
+
             self.objs_carrot[name].set_pose(Pose.create_from_pq(p=p, q=q))
 
         for idx, name in enumerate(self.model_db_plate):
-            is_select = self.select_plate_ids[env_idx] == idx  # [b]
-            p_reset = torch.tensor([2.0, 0.3 * idx, 1.0], device=self.device).reshape(1, -1).repeat(n_envs_reset, 1)  # [b, 3]
-            p_select = xyz_configs[self.select_pos_ids[env_idx], 1].reshape(n_envs_reset, 3)  # [b, 3]
+            is_select = self.select_plate_ids == idx  # [b]
+            p_reset = torch.tensor([2.0, 0.3 * idx, 1.0], device=self.device).reshape(1, -1).repeat(b, 1)  # [b, 3]
+            p_select = xyz_configs[self.select_pos_ids, 1].reshape(b, 3)  # [b, 3]
             p = torch.where(is_select.unsqueeze(1).repeat(1, 3), p_select, p_reset)  # [b, 3]
 
-            q_reset = torch.tensor([0, 0, 0, 1], device=self.device).reshape(1, -1).repeat(n_envs_reset, 1)  # [b, 4]
-            q_select = quat_configs[self.select_quat_ids[env_idx], 1].reshape(n_envs_reset, 4)  # [b, 4]
+            q_reset = torch.tensor([0, 0, 0, 1], device=self.device).reshape(1, -1).repeat(b, 1)  # [b, 4]
+            q_select = quat_configs[self.select_quat_ids, 1].reshape(b, 4)  # [b, 4]
             q = torch.where(is_select.unsqueeze(1).repeat(1, 4), q_select, q_reset)  # [b, 4]
 
             self.objs_plate[name].set_pose(Pose.create_from_pq(p=p, q=q))
@@ -345,6 +332,7 @@ class PutOnPlateInScene25(BaseEnv):
         c_q_matrix = rotation_conversions.quaternion_to_matrix(self.carrot_q_after_settle)  # [b, 3, 3]
         c_bbox_corners_rot = torch.matmul(c_bbox_corners, c_q_matrix.transpose(1, 2))  # [b, 8, 3]
         c_rotated_bbox_size = c_bbox_corners_rot.max(dim=1).values - c_bbox_corners_rot.min(dim=1).values  # [b, 3]
+        self.carrot_bbox_world = c_rotated_bbox_size  # [b, 3]
 
         # plate
         plate_bbox_world = torch.stack([self.model_bbox_sizes[n] for n in select_plate])  # [b, 3]
@@ -354,40 +342,24 @@ class PutOnPlateInScene25(BaseEnv):
         p_q_matrix = rotation_conversions.quaternion_to_matrix(self.plate_q_after_settle)  # [b, 3, 3]
         p_bbox_corners_rot = torch.matmul(p_bbox_corners, p_q_matrix.transpose(1, 2))  # [b, 8, 3]
         p_rotated_bbox_size = p_bbox_corners_rot.max(dim=1).values - p_bbox_corners_rot.min(dim=1).values  # [b, 3]
+        self.plate_bbox_world = p_rotated_bbox_size  # [b, 3]
 
-        ######### Partial Reset, Revised by Tonghe on 07/13/2025 ###################################################
-        # Handle bbox tensors for full vs partial reset - Keep full size for evaluate() method
-        if not hasattr(self, 'carrot_bbox_world') or len(env_idx) == self.num_envs:
-            self.carrot_bbox_world = torch.zeros((self.num_envs, 3), device=self.device)
-        # Update only the environments being reset
-        self.carrot_bbox_world[env_idx] = c_rotated_bbox_size
-        
-        if not hasattr(self, 'plate_bbox_world') or len(env_idx) == self.num_envs:
-            self.plate_bbox_world = torch.zeros((self.num_envs, 3), device=self.device)
-        # Update only the environments being reset
-        self.plate_bbox_world[env_idx] = p_rotated_bbox_size
-        
-        # stats to track (for all the environments.)
-        if not hasattr(self, 'consecutive_grasp'):
-            self.consecutive_grasp = torch.zeros((self.num_envs,), dtype=torch.int32, device=self.device)
-            self.episode_stats = dict(
-                is_src_obj_grasped=torch.zeros((self.num_envs,), dtype=torch.bool, device=self.device),
-                consecutive_grasp=torch.zeros((self.num_envs,), dtype=torch.bool, device=self.device),
-                src_on_target=torch.zeros((self.num_envs,), dtype=torch.bool, device=self.device),
-                gripper_carrot_dist=torch.zeros((self.num_envs,), dtype=torch.float32, device=self.device),
-                gripper_plate_dist=torch.zeros((self.num_envs,), dtype=torch.float32, device=self.device),
-                carrot_plate_dist=torch.zeros((self.num_envs,), dtype=torch.float32, device=self.device),
-            )
-        else:
-            # only update info for the environments that are being reset. 
-            self.consecutive_grasp[env_idx] = 0
-            self.episode_stats["is_src_obj_grasped"][env_idx] = False
-            self.episode_stats["consecutive_grasp"][env_idx] = False
-            self.episode_stats["src_on_target"][env_idx] = False
-            self.episode_stats["gripper_carrot_dist"][env_idx] = 0.0
-            self.episode_stats["gripper_plate_dist"][env_idx] = 0.0
-            self.episode_stats["carrot_plate_dist"][env_idx] = 0.0
-        ############################################################################################################
+        # stats to track
+        self.consecutive_grasp = torch.zeros((b,), dtype=torch.int32, device=self.device)
+        self.episode_stats = dict(
+            # all_obj_keep_height=torch.zeros((b,), dtype=torch.bool),
+            # moved_correct_obj=torch.zeros((b,), dtype=torch.bool),
+            # moved_wrong_obj=torch.zeros((b,), dtype=torch.bool),
+            # near_tgt_obj=torch.zeros((b,), dtype=torch.bool),
+            is_src_obj_grasped=torch.zeros((b,), dtype=torch.bool, device=self.device),
+            # is_closest_to_tgt=torch.zeros((b,), dtype=torch.bool),
+            consecutive_grasp=torch.zeros((b,), dtype=torch.bool, device=self.device),
+            src_on_target=torch.zeros((b,), dtype=torch.bool, device=self.device),
+
+            gripper_carrot_dist=torch.zeros((b,), dtype=torch.float32, device=self.device),
+            gripper_plate_dist=torch.zeros((b,), dtype=torch.float32, device=self.device),
+            carrot_plate_dist=torch.zeros((b,), dtype=torch.float32, device=self.device),
+        )
         self.extra_stats = dict()
 
     def _initialize_episode_pre(self, env_idx: torch.Tensor, options: dict):
@@ -411,7 +383,7 @@ class PutOnPlateInScene25(BaseEnv):
         netforce_flag_required_offset = 0.03
 
         b = self.num_envs
-        # print(f"self.select_carrot_ids={self.select_carrot_ids}")
+
         # actor
         select_carrot = [self.carrot_names[idx] for idx in self.select_carrot_ids]
         select_plate = [self.plate_names[idx] for idx in self.select_plate_ids]
@@ -452,6 +424,7 @@ class PutOnPlateInScene25(BaseEnv):
         # whether the source object is grasped
 
         is_src_obj_grasped = torch.zeros((b,), dtype=torch.bool, device=self.device)  # [b]
+
         for idx, name in enumerate(self.model_db_carrot):
             is_select = self.select_carrot_ids == idx  # [b]
             grasped = self.agent.is_grasping(self.objs_carrot[name])  # [b]
@@ -528,11 +501,11 @@ class PutOnPlateInScene25(BaseEnv):
 
     def get_language_instruction(self):
         print(f"*"*25)
-        # print(f"Debu info into {self.__class__.__name__}: get_language_instruction()")
+        print(f"Debu info into {self.__class__.__name__}: get_language_instruction()")
         select_carrot = [self.carrot_names[idx] for idx in self.select_carrot_ids]
         select_plate = [self.plate_names[idx] for idx in self.select_plate_ids]
-        # print(f"select_carrot_ids={self.select_carrot_ids}, select_carrot={select_carrot}")
-        # print(f"select_plate_ids={self.select_carrot_ids}, select_plate={select_plate}")
+        print(f"select_carrot_ids={self.select_carrot_ids}, select_carrot={select_carrot}")
+        print(f"select_plate_ids={self.select_carrot_ids}, select_plate={select_plate}")
 
         instruct = []
         for idx in range(self.num_envs):
@@ -1051,9 +1024,9 @@ class PutOnPlateInScene25VisionTexture03(PutOnPlateInScene25MainV3):
     overlay_texture_mix_ratio = 0.3
 
     def _initialize_episode_pre(self, env_idx: torch.Tensor, options: dict):
-        ######### Partial Reset, Revised by Tonghe on 07/13/2025 ###################################################
-        num_envs_to_reset = len(env_idx)
-        ############################################################################################################
+        # NOTE: this part of code is not GPU parallelized
+        b = len(env_idx)
+        
         obj_set = options.get("obj_set", "train")
         if obj_set == "train":
             le = 1
@@ -1076,35 +1049,18 @@ class PutOnPlateInScene25VisionTexture03(PutOnPlateInScene25MainV3):
         l2 = len(self.quat_configs)
         ltt = lc * le * lp * lo * l1 * l2
 
-        ############################################################################################################
-        # Partial Reset, Revised by Tonghe on 07/13/2025 ###########################################################
         # rand and select
         # Synchronized reset:
-        if len(env_idx) == self.num_envs:
-            episode_id = options.get("episode_id",
-                                    torch.randint(low=0, high=ltt, size=(self.num_envs,), device=self.device))
-            episode_id = episode_id.reshape(self.num_envs)
-            episode_id = episode_id % ltt
-        elif 0< len(env_idx) and len(env_idx) < self.num_envs:
-            # Asynchronous (partial) reset
-            # env_idx are the ids of environments to be reset. 
-            # When there is a done env, env_idx is not empty. 
-            # Generate random integers within (0,ltt) at those coordinates in list env_idx (which should be reset)
-            # and keep the episode_id the same as before (queried from self.episode_id) at other coordinates 
-            episode_id = self.episode_id.clone()
-            reset_env_ids = torch.tensor(env_idx, device=self.device, dtype=torch.long)
-            # Use the environment's proper RNG instead of global torch.randint. 
-            # Warning: if you use the same seed during reset, each environment will always reset to the same scene, which correspond to the same episode_id. 
-            # To add diversity, you can pass different (however, reproducible) seeds during reset, like, increase the base_seed by 1 for each manual reset at the start of a new parallel rollout. 
-            reset_episode_id_vals = torch.randint(0, ltt, (num_envs_to_reset,), device=self.device)
-            episode_id[reset_env_ids] = reset_episode_id_vals
-            episode_id = episode_id.reshape(self.num_envs)
-            print(f"|Execute partial reset| with env_idx={env_idx}, reset_episode_id_vals={reset_episode_id_vals}: episode_id={episode_id}")
-         # update and store episode_id for each env
-        self.episode_id: torch.Tensor = episode_id
-        ############################################################################################################
+        # if use_sync_reset:
+        assert b == self.num_envs
+        episode_id = options.get("episode_id",
+                                torch.randint(low=0, high=ltt, size=(self.num_envs,), device=self.device))
         
-       
+        
+        episode_id = episode_id.reshape(self.num_envs)
+        episode_id = episode_id % ltt
+        # update and store episode_id for each env
+        self.episode_id: torch.Tensor = episode_id
         
         self.select_carrot_ids = episode_id // (le * lp * lo * l1 * l2) + lc_offset  # [b]
         self.select_extra_ids = (episode_id // (lp * lo * l1 * l2)) % le + le_offset  # [b]
@@ -1113,48 +1069,35 @@ class PutOnPlateInScene25VisionTexture03(PutOnPlateInScene25MainV3):
         self.select_pos_ids = (episode_id // l2) % l1
         self.select_quat_ids = episode_id % l2
         
-        # print(f"select_carrot_ids={self.select_carrot_ids}")
-        # print(f"select_extra_ids={self.select_extra_ids}")
-        # print(f"select_plate_ids={self.select_plate_ids}")
-        # print(f"select_overlay_ids={self.select_overlay_ids}")
-        # print(f"select_pos_ids={self.select_pos_ids}")
-        # print(f"select_quat_ids={self.select_quat_ids}")
+        print(f"select_carrot_ids={self.select_carrot_ids}")
+        print(f"select_extra_ids={self.select_extra_ids}")
+        print(f"select_plate_ids={self.select_plate_ids}")
+        print(f"select_overlay_ids={self.select_overlay_ids}")
+        print(f"select_pos_ids={self.select_pos_ids}")
+        print(f"select_quat_ids={self.select_quat_ids}")
 
     def _initialize_episode(self, env_idx: torch.Tensor, options: dict):
-        """
-        Do partial reset for env_idx ids. 
-        """
         self._initialize_episode_pre(env_idx, options)
 
-        b = len(env_idx)
+        b = self.num_envs
 
         # rgb overlay
         sensor = self._sensor_configs[self.rgb_camera_name]
         assert sensor.width == 640
         assert sensor.height == 480
-        # Handle overlay tensors for full vs partial reset - Keep full size for get_obs() method
-        overlay_images = np.stack([self.overlay_images_numpy[idx] for idx in self.select_overlay_ids[env_idx]])
-        overlay_textures = np.stack([self.overlay_textures_numpy[idx] for idx in self.select_overlay_ids[env_idx]])
-        overlay_mix = np.array([self.overlay_mix_numpy[idx] for idx in self.select_overlay_ids[env_idx]])
-        if not hasattr(self, 'overlay_images') or len(env_idx) == self.num_envs:
-            self.overlay_images = torch.zeros((self.num_envs, 480, 640, 3), device=self.device)
-        # Update only the environments being reset
-        self.overlay_images[env_idx] = torch.tensor(overlay_images, device=self.device, dtype=torch.float32)
-        if not hasattr(self, 'overlay_textures') or len(env_idx) == self.num_envs:
-            self.overlay_textures = torch.zeros((self.num_envs, 480, 640, 3), device=self.device, dtype=torch.float32)
-        # Update only the environments being reset
-        self.overlay_textures[env_idx] = torch.tensor(overlay_textures, device=self.device, dtype=torch.float32)
-        if not hasattr(self, 'overlay_mix') or len(env_idx) == self.num_envs:
-            self.overlay_mix = torch.zeros((self.num_envs,), device=self.device, dtype=torch.float32)
-        # Update only the environments being reset
-        self.overlay_mix[env_idx] = torch.tensor(overlay_mix, device=self.device, dtype=torch.float32)
+        overlay_images = np.stack([self.overlay_images_numpy[idx] for idx in self.select_overlay_ids])
+        self.overlay_images = torch.tensor(overlay_images, device=self.device)  # [b, H, W, 3]
+        overlay_textures = np.stack([self.overlay_textures_numpy[idx] for idx in self.select_extra_ids])
+        self.overlay_textures = torch.tensor(overlay_textures, device=self.device)  # [b, H, W, 3]
+        overlay_mix = np.array([self.overlay_mix_numpy[idx] for idx in self.select_extra_ids])
+        self.overlay_mix = torch.tensor(overlay_mix, device=self.device)  # [b]
 
         # xyz and quat
         xyz_configs = torch.tensor(self.xyz_configs, device=self.device)
         quat_configs = torch.tensor(self.quat_configs, device=self.device)
 
-        select_carrot = [self.carrot_names[idx] for idx in self.select_carrot_ids[env_idx]]
-        select_plate = [self.plate_names[idx] for idx in self.select_plate_ids[env_idx]]
+        select_carrot = [self.carrot_names[idx] for idx in self.select_carrot_ids]
+        select_plate = [self.plate_names[idx] for idx in self.select_plate_ids]
         carrot_actor = [self.objs_carrot[n] for n in select_carrot]
         plate_actor = [self.objs_plate[n] for n in select_plate]
 
@@ -1172,25 +1115,26 @@ class PutOnPlateInScene25VisionTexture03(PutOnPlateInScene25MainV3):
 
         # set pose for objs
         for idx, name in enumerate(self.model_db_carrot):
-            is_select = self.select_carrot_ids[env_idx] == idx  # [b]
+            is_select = self.select_carrot_ids == idx  # [b]
             p_reset = torch.tensor([1.0, 0.3 * idx, 1.0], device=self.device).reshape(1, -1).repeat(b, 1)  # [b, 3]
-            p_select = xyz_configs[self.select_pos_ids[env_idx], 0].reshape(b, 3)  # [b, 3]
+            # print(f"xyz_configs={xyz_configs.shape}, self.select_pos_ids={self.select_pos_ids.shape}")
+            p_select = xyz_configs[self.select_pos_ids, 0].reshape(b, 3)  # [b, 3]
             p = torch.where(is_select.unsqueeze(1).repeat(1, 3), p_select, p_reset)  # [b, 3]
 
             q_reset = torch.tensor([0, 0, 0, 1], device=self.device).reshape(1, -1).repeat(b, 1)  # [b, 4]
-            q_select = quat_configs[self.select_quat_ids[env_idx], 0].reshape(b, 4)  # [b, 4]
+            q_select = quat_configs[self.select_quat_ids, 0].reshape(b, 4)  # [b, 4]
             q = torch.where(is_select.unsqueeze(1).repeat(1, 4), q_select, q_reset)  # [b, 4]
-            
+            print(f"p={p}, q={q}")
             self.objs_carrot[name].set_pose(Pose.create_from_pq(p=p, q=q))
 
         for idx, name in enumerate(self.model_db_plate):
-            is_select = self.select_plate_ids[env_idx] == idx  # [b]
+            is_select = self.select_plate_ids == idx  # [b]
             p_reset = torch.tensor([2.0, 0.3 * idx, 1.0], device=self.device).reshape(1, -1).repeat(b, 1)  # [b, 3]
-            p_select = xyz_configs[self.select_pos_ids[env_idx], 1].reshape(b, 3)  # [b, 3]
+            p_select = xyz_configs[self.select_pos_ids, 1].reshape(b, 3)  # [b, 3]
             p = torch.where(is_select.unsqueeze(1).repeat(1, 3), p_select, p_reset)  # [b, 3]
 
             q_reset = torch.tensor([0, 0, 0, 1], device=self.device).reshape(1, -1).repeat(b, 1)  # [b, 4]
-            q_select = quat_configs[self.select_quat_ids[env_idx], 1].reshape(b, 4)  # [b, 4]
+            q_select = quat_configs[self.select_quat_ids, 1].reshape(b, 4)  # [b, 4]
             q = torch.where(is_select.unsqueeze(1).repeat(1, 4), q_select, q_reset)  # [b, 4]
 
             self.objs_plate[name].set_pose(Pose.create_from_pq(p=p, q=q))
@@ -1229,6 +1173,7 @@ class PutOnPlateInScene25VisionTexture03(PutOnPlateInScene25MainV3):
         c_q_matrix = rotation_conversions.quaternion_to_matrix(self.carrot_q_after_settle)  # [b, 3, 3]
         c_bbox_corners_rot = torch.matmul(c_bbox_corners, c_q_matrix.transpose(1, 2))  # [b, 8, 3]
         c_rotated_bbox_size = c_bbox_corners_rot.max(dim=1).values - c_bbox_corners_rot.min(dim=1).values  # [b, 3]
+        self.carrot_bbox_world = c_rotated_bbox_size  # [b, 3]
 
         # plate
         plate_bbox_world = torch.stack([self.model_bbox_sizes[n] for n in select_plate])  # [b, 3]
@@ -1238,37 +1183,24 @@ class PutOnPlateInScene25VisionTexture03(PutOnPlateInScene25MainV3):
         p_q_matrix = rotation_conversions.quaternion_to_matrix(self.plate_q_after_settle)  # [b, 3, 3]
         p_bbox_corners_rot = torch.matmul(p_bbox_corners, p_q_matrix.transpose(1, 2))  # [b, 8, 3]
         p_rotated_bbox_size = p_bbox_corners_rot.max(dim=1).values - p_bbox_corners_rot.min(dim=1).values  # [b, 3]
+        self.plate_bbox_world = p_rotated_bbox_size  # [b, 3]
 
-        # Handle bbox tensors for full vs partial reset - Keep full size for evaluate() method
-        if not hasattr(self, 'carrot_bbox_world') or len(env_idx) == self.num_envs:
-            # Full reset: Initialize full-size tensors
-            self.carrot_bbox_world = torch.zeros((self.num_envs, 3), device=self.device)
-            self.plate_bbox_world = torch.zeros((self.num_envs, 3), device=self.device)
-        
-        # Update only the environments being reset
-        self.carrot_bbox_world[env_idx] = c_rotated_bbox_size
-        self.plate_bbox_world[env_idx] = p_rotated_bbox_size
+        # stats to track
+        self.consecutive_grasp = torch.zeros((b,), dtype=torch.int32, device=self.device)
+        self.episode_stats = dict(
+            # all_obj_keep_height=torch.zeros((b,), dtype=torch.bool),
+            # moved_correct_obj=torch.zeros((b,), dtype=torch.bool),
+            # moved_wrong_obj=torch.zeros((b,), dtype=torch.bool),
+            # near_tgt_obj=torch.zeros((b,), dtype=torch.bool),
+            is_src_obj_grasped=torch.zeros((b,), dtype=torch.bool, device=self.device),
+            # is_closest_to_tgt=torch.zeros((b,), dtype=torch.bool),
+            consecutive_grasp=torch.zeros((b,), dtype=torch.bool, device=self.device),
+            src_on_target=torch.zeros((b,), dtype=torch.bool, device=self.device),
 
-        # stats to track (for all the environments.)
-        if not hasattr(self, 'consecutive_grasp'):
-            self.consecutive_grasp = torch.zeros((self.num_envs,), dtype=torch.int32, device=self.device)
-            self.episode_stats = dict(
-                is_src_obj_grasped=torch.zeros((self.num_envs,), dtype=torch.bool, device=self.device),
-                consecutive_grasp=torch.zeros((self.num_envs,), dtype=torch.bool, device=self.device),
-                src_on_target=torch.zeros((self.num_envs,), dtype=torch.bool, device=self.device),
-                gripper_carrot_dist=torch.zeros((self.num_envs,), dtype=torch.float32, device=self.device),
-                gripper_plate_dist=torch.zeros((self.num_envs,), dtype=torch.float32, device=self.device),
-                carrot_plate_dist=torch.zeros((self.num_envs,), dtype=torch.float32, device=self.device),
-            )
-        else:
-            # only update info for the environments that are being reset. 
-            self.consecutive_grasp[env_idx] = 0
-            self.episode_stats["is_src_obj_grasped"][env_idx] = False
-            self.episode_stats["consecutive_grasp"][env_idx] = False
-            self.episode_stats["src_on_target"][env_idx] = False
-            self.episode_stats["gripper_carrot_dist"][env_idx] = 0.0
-            self.episode_stats["gripper_plate_dist"][env_idx] = 0.0
-            self.episode_stats["carrot_plate_dist"][env_idx] = 0.0
+            gripper_carrot_dist=torch.zeros((b,), dtype=torch.float32, device=self.device),
+            gripper_plate_dist=torch.zeros((b,), dtype=torch.float32, device=self.device),
+            carrot_plate_dist=torch.zeros((b,), dtype=torch.float32, device=self.device),
+        )
 
     def _green_sceen_rgb(self, rgb, segmentation, overlay_img, overlay_texture, overlay_mix):
         """returns green screened RGB data given a batch of RGB and segmentation images and one overlay image"""
@@ -1286,8 +1218,8 @@ class PutOnPlateInScene25VisionTexture03(PutOnPlateInScene25MainV3):
         mask = (~arm_obj_mask).to(torch.float32).unsqueeze(-1)  # [b, H, W, 1]
         mix = overlay_mix.unsqueeze(1).unsqueeze(1).unsqueeze(1)  # [b, 1, 1, 1]
         mix = mix * self.overlay_texture_mix_ratio
-        assert rgb.shape == overlay_img.shape, f"rgb.shape={rgb.shape}, overlay_img.shape={overlay_img.shape}"
-        assert rgb.shape == overlay_texture.shape, f"rgb.shape={rgb.shape}, overlay_texture.shape={overlay_texture.shape}"
+        assert rgb.shape == overlay_img.shape
+        assert rgb.shape == overlay_texture.shape
 
         # Step 1
         b, H, W, _ = mask.shape
@@ -1381,7 +1313,10 @@ class PutOnPlateInScene25VisionWhole03(PutOnPlateInScene25MainV3):
         assert len(self.overlay_mix_numpy) == 21
 
     def _initialize_episode_pre(self, env_idx: torch.Tensor, options: dict):
-        
+        # NOTE: this part of code is not GPU parallelized
+        b = len(env_idx)   # number of environments that will be reset. 
+        assert b == self.num_envs
+
         obj_set = options.get("obj_set", "train")
         if obj_set == "train":
             le = 1
@@ -1403,42 +1338,19 @@ class PutOnPlateInScene25VisionWhole03(PutOnPlateInScene25MainV3):
         l1 = len(self.xyz_configs)
         l2 = len(self.quat_configs)
         ltt = lc * le * lp * lo * l1 * l2
-        
-        
-        ############################################################################################################
-        ## Partial Reset, Revised by Tonghe on 07/13/2025 ###########################################################
-        num_envs_to_reset = len(env_idx)
-        # rand and select
-        # Synchronized reset:
-        if len(env_idx) == self.num_envs:
-            episode_id = options.get("episode_id",
-                                    torch.randint(low=0, high=ltt, size=(self.num_envs,), device=self.device))
-            episode_id = episode_id.reshape(self.num_envs)
-            episode_id = episode_id % ltt
-        elif 0< len(env_idx) and len(env_idx) < self.num_envs:
-            # Asynchronous (partial) reset
-            # env_idx are the ids of environments to be reset. 
-            # When there is a done env, env_idx is not empty. 
-            # Generate random integers within (0,ltt) at those coordinates in list env_idx (which should be reset)
-            # and keep the episode_id the same as before (queried from self.episode_id) at other coordinates 
-            episode_id = self.episode_id.clone()
-            reset_env_ids = torch.tensor(env_idx, device=self.device, dtype=torch.long)
-            # Use the environment's proper RNG instead of global torch.randint. 
-            # Warning: if you use the same seed during reset, each environment will always reset to the same scene, which correspond to the same episode_id. 
-            # To add diversity, you can pass different (however, reproducible) seeds during reset, like, increase the base_seed by 1 for each manual reset at the start of a new parallel rollout. 
-            reset_episode_id_vals = torch.randint(0, ltt, (num_envs_to_reset,), device=self.device)
-            episode_id[reset_env_ids] = reset_episode_id_vals
-            episode_id = episode_id.reshape(self.num_envs)
-            print(f"|Execute partial reset| with env_idx={env_idx}, reset_episode_id_vals={reset_episode_id_vals}: episode_id={episode_id}")
-        self.episode_id: torch.Tensor = episode_id
-        ############################################################################################################
 
-        self.select_carrot_ids = episode_id // (le * lp * lo * l1 * l2) + lc_offset  # [b]  # type: ignore
-        self.select_extra_ids = (episode_id // (lp * lo * l1 * l2)) % le + le_offset  # [b]  # type: ignore
-        self.select_plate_ids = (episode_id // (lo * l1 * l2)) % lp  # type: ignore
-        self.select_overlay_ids = (episode_id // (l1 * l2)) % lo + lo_offset  # type: ignore
-        self.select_pos_ids = (episode_id // l2) % l1  # type: ignore
-        self.select_quat_ids = episode_id % l2  # type: ignore
+        # rand and select
+        episode_id = options.get("episode_id",
+                                 torch.randint(low=0, high=ltt, size=(b,), device=self.device))
+        episode_id = episode_id.reshape(b)
+        episode_id = episode_id % ltt
+
+        self.select_carrot_ids = episode_id // (le * lp * lo * l1 * l2) + lc_offset  # [b]
+        self.select_extra_ids = (episode_id // (lp * lo * l1 * l2)) % le + le_offset  # [b]
+        self.select_plate_ids = (episode_id // (lo * l1 * l2)) % lp
+        self.select_overlay_ids = (episode_id // (l1 * l2)) % lo + lo_offset
+        self.select_pos_ids = (episode_id // l2) % l1
+        self.select_quat_ids = episode_id % l2
 
     def _initialize_episode(self, env_idx: torch.Tensor, options: dict):
         self._initialize_episode_pre(env_idx, options)
@@ -1449,31 +1361,19 @@ class PutOnPlateInScene25VisionWhole03(PutOnPlateInScene25MainV3):
         sensor = self._sensor_configs[self.rgb_camera_name]
         assert sensor.width == 640
         assert sensor.height == 480
-        ######### Partial Reset, Revised by Tonghe on 07/13/2025 ###################################################
-        # Handle overlay tensors for full vs partial reset - Keep full size for get_obs() method
-        overlay_images = np.stack([self.overlay_images_numpy[idx] for idx in self.select_overlay_ids[env_idx]])
-        overlay_textures = np.stack([self.overlay_textures_numpy[idx] for idx in self.select_overlay_ids[env_idx]])
-        overlay_mix = np.array([self.overlay_mix_numpy[idx] for idx in self.select_overlay_ids[env_idx]])
-        if not hasattr(self, 'overlay_images') or len(env_idx) == self.num_envs:
-            self.overlay_images = torch.zeros((self.num_envs, 480, 640, 3), device=self.device)
-        # Update only the environments being reset
-        self.overlay_images[env_idx] = torch.tensor(overlay_images, device=self.device, dtype=torch.float32)
-        if not hasattr(self, 'overlay_textures') or len(env_idx) == self.num_envs:
-            self.overlay_textures = torch.zeros((self.num_envs, 480, 640, 3), device=self.device, dtype=torch.float32)
-        # Update only the environments being reset
-        self.overlay_textures[env_idx] = torch.tensor(overlay_textures, device=self.device, dtype=torch.float32)
-        if not hasattr(self, 'overlay_mix') or len(env_idx) == self.num_envs:
-            self.overlay_mix = torch.zeros((self.num_envs,), device=self.device, dtype=torch.float32)
-        # Update only the environments being reset
-        self.overlay_mix[env_idx] = torch.tensor(overlay_mix, device=self.device, dtype=torch.float32)
-        ############################################################################################################
-        
+        overlay_images = np.stack([self.overlay_images_numpy[idx] for idx in self.select_overlay_ids])
+        self.overlay_images = torch.tensor(overlay_images, device=self.device)  # [b, H, W, 3]
+        overlay_textures = np.stack([self.overlay_textures_numpy[idx] for idx in self.select_extra_ids])
+        self.overlay_textures = torch.tensor(overlay_textures, device=self.device)  # [b, H, W, 3]
+        overlay_mix = np.array([self.overlay_mix_numpy[idx] for idx in self.select_extra_ids])
+        self.overlay_mix = torch.tensor(overlay_mix, device=self.device)  # [b]
+
         # xyz and quat
         xyz_configs = torch.tensor(self.xyz_configs, device=self.device)
         quat_configs = torch.tensor(self.quat_configs, device=self.device)
 
-        select_carrot = [self.carrot_names[idx] for idx in self.select_carrot_ids[env_idx]]
-        select_plate = [self.plate_names[idx] for idx in self.select_plate_ids[env_idx]]
+        select_carrot = [self.carrot_names[idx] for idx in self.select_carrot_ids]
+        select_plate = [self.plate_names[idx] for idx in self.select_plate_ids]
         carrot_actor = [self.objs_carrot[n] for n in select_carrot]
         plate_actor = [self.objs_plate[n] for n in select_plate]
 
@@ -1491,25 +1391,25 @@ class PutOnPlateInScene25VisionWhole03(PutOnPlateInScene25MainV3):
 
         # set pose for objs
         for idx, name in enumerate(self.model_db_carrot):
-            is_select = self.select_carrot_ids[env_idx] == idx  # [b]
+            is_select = self.select_carrot_ids == idx  # [b]
             p_reset = torch.tensor([1.0, 0.3 * idx, 1.0], device=self.device).reshape(1, -1).repeat(b, 1)  # [b, 3]
-            p_select = xyz_configs[self.select_pos_ids[env_idx], 0].reshape(b, 3)  # [b, 3]
+            p_select = xyz_configs[self.select_pos_ids, 0].reshape(b, 3)  # [b, 3]
             p = torch.where(is_select.unsqueeze(1).repeat(1, 3), p_select, p_reset)  # [b, 3]
 
             q_reset = torch.tensor([0, 0, 0, 1], device=self.device).reshape(1, -1).repeat(b, 1)  # [b, 4]
-            q_select = quat_configs[self.select_quat_ids[env_idx], 0].reshape(b, 4)  # [b, 4]
+            q_select = quat_configs[self.select_quat_ids, 0].reshape(b, 4)  # [b, 4]
             q = torch.where(is_select.unsqueeze(1).repeat(1, 4), q_select, q_reset)  # [b, 4]
 
             self.objs_carrot[name].set_pose(Pose.create_from_pq(p=p, q=q))
 
         for idx, name in enumerate(self.model_db_plate):
-            is_select = self.select_plate_ids[env_idx] == idx  # [b]
+            is_select = self.select_plate_ids == idx  # [b]
             p_reset = torch.tensor([2.0, 0.3 * idx, 1.0], device=self.device).reshape(1, -1).repeat(b, 1)  # [b, 3]
-            p_select = xyz_configs[self.select_pos_ids[env_idx], 1].reshape(b, 3)  # [b, 3]
+            p_select = xyz_configs[self.select_pos_ids, 1].reshape(b, 3)  # [b, 3]
             p = torch.where(is_select.unsqueeze(1).repeat(1, 3), p_select, p_reset)  # [b, 3]
 
             q_reset = torch.tensor([0, 0, 0, 1], device=self.device).reshape(1, -1).repeat(b, 1)  # [b, 4]
-            q_select = quat_configs[self.select_quat_ids[env_idx], 1].reshape(b, 4)  # [b, 4]
+            q_select = quat_configs[self.select_quat_ids, 1].reshape(b, 4)  # [b, 4]
             q = torch.where(is_select.unsqueeze(1).repeat(1, 4), q_select, q_reset)  # [b, 4]
 
             self.objs_plate[name].set_pose(Pose.create_from_pq(p=p, q=q))
@@ -1548,6 +1448,7 @@ class PutOnPlateInScene25VisionWhole03(PutOnPlateInScene25MainV3):
         c_q_matrix = rotation_conversions.quaternion_to_matrix(self.carrot_q_after_settle)  # [b, 3, 3]
         c_bbox_corners_rot = torch.matmul(c_bbox_corners, c_q_matrix.transpose(1, 2))  # [b, 8, 3]
         c_rotated_bbox_size = c_bbox_corners_rot.max(dim=1).values - c_bbox_corners_rot.min(dim=1).values  # [b, 3]
+        self.carrot_bbox_world = c_rotated_bbox_size  # [b, 3]
 
         # plate
         plate_bbox_world = torch.stack([self.model_bbox_sizes[n] for n in select_plate])  # [b, 3]
@@ -1557,41 +1458,25 @@ class PutOnPlateInScene25VisionWhole03(PutOnPlateInScene25MainV3):
         p_q_matrix = rotation_conversions.quaternion_to_matrix(self.plate_q_after_settle)  # [b, 3, 3]
         p_bbox_corners_rot = torch.matmul(p_bbox_corners, p_q_matrix.transpose(1, 2))  # [b, 8, 3]
         p_rotated_bbox_size = p_bbox_corners_rot.max(dim=1).values - p_bbox_corners_rot.min(dim=1).values  # [b, 3]
-        
-        ######### Partial Reset, Revised by Tonghe on 07/13/2025 ###################################################
-        # Handle bbox tensors for full vs partial reset - Keep full size for evaluate() method
-        if not hasattr(self, 'carrot_bbox_world') or len(env_idx) == self.num_envs:
-            self.carrot_bbox_world = torch.zeros((self.num_envs, 3), device=self.device)
-        # Update only the environments being reset
-        self.carrot_bbox_world[env_idx] = c_rotated_bbox_size
-        
-        if not hasattr(self, 'plate_bbox_world') or len(env_idx) == self.num_envs:
-            self.plate_bbox_world = torch.zeros((self.num_envs, 3), device=self.device)
-        # Update only the environments being reset
-        self.plate_bbox_world[env_idx] = p_rotated_bbox_size
-        
-       # stats to track (for all the environments.)
-        if not hasattr(self, 'consecutive_grasp'):
-            self.consecutive_grasp = torch.zeros((self.num_envs,), dtype=torch.int32, device=self.device)
-            self.episode_stats = dict(
-                is_src_obj_grasped=torch.zeros((self.num_envs,), dtype=torch.bool, device=self.device),
-                consecutive_grasp=torch.zeros((self.num_envs,), dtype=torch.bool, device=self.device),
-                src_on_target=torch.zeros((self.num_envs,), dtype=torch.bool, device=self.device),
-                gripper_carrot_dist=torch.zeros((self.num_envs,), dtype=torch.float32, device=self.device),
-                gripper_plate_dist=torch.zeros((self.num_envs,), dtype=torch.float32, device=self.device),
-                carrot_plate_dist=torch.zeros((self.num_envs,), dtype=torch.float32, device=self.device),
-            )
-        else:
-            # only update info for the environments that are being reset. 
-            self.consecutive_grasp[env_idx] = 0
-            self.episode_stats["is_src_obj_grasped"][env_idx] = False
-            self.episode_stats["consecutive_grasp"][env_idx] = False
-            self.episode_stats["src_on_target"][env_idx] = False
-            self.episode_stats["gripper_carrot_dist"][env_idx] = 0.0
-            self.episode_stats["gripper_plate_dist"][env_idx] = 0.0
-            self.episode_stats["carrot_plate_dist"][env_idx] = 0.0
-        ############################################################################################################
-        
+        self.plate_bbox_world = p_rotated_bbox_size  # [b, 3]
+
+        # stats to track
+        self.consecutive_grasp = torch.zeros((b,), dtype=torch.int32, device=self.device)
+        self.episode_stats = dict(
+            # all_obj_keep_height=torch.zeros((b,), dtype=torch.bool),
+            # moved_correct_obj=torch.zeros((b,), dtype=torch.bool),
+            # moved_wrong_obj=torch.zeros((b,), dtype=torch.bool),
+            # near_tgt_obj=torch.zeros((b,), dtype=torch.bool),
+            is_src_obj_grasped=torch.zeros((b,), dtype=torch.bool, device=self.device),
+            # is_closest_to_tgt=torch.zeros((b,), dtype=torch.bool),
+            consecutive_grasp=torch.zeros((b,), dtype=torch.bool, device=self.device),
+            src_on_target=torch.zeros((b,), dtype=torch.bool, device=self.device),
+
+            gripper_carrot_dist=torch.zeros((b,), dtype=torch.float32, device=self.device),
+            gripper_plate_dist=torch.zeros((b,), dtype=torch.float32, device=self.device),
+            carrot_plate_dist=torch.zeros((b,), dtype=torch.float32, device=self.device),
+        )
+
     def _green_sceen_rgb(self, rgb, segmentation, overlay_img, overlay_texture, overlay_mix):
         """returns green screened RGB data given a batch of RGB and segmentation images and one overlay image"""
         actor_seg = segmentation[..., 0]
@@ -1646,6 +1531,10 @@ class PutOnPlateInScene25VisionWhole05(PutOnPlateInScene25VisionWhole03):
 @register_env("PutOnPlateInScene25Carrot-v1", max_episode_steps=80, asset_download_ids=["bridge_v2_real2sim"])
 class PutOnPlateInScene25Carrot(PutOnPlateInScene25MainV3):
     def _initialize_episode_pre(self, env_idx: torch.Tensor, options: dict):
+        # NOTE: this part of code is not GPU parallelized
+        b = len(env_idx)
+        assert b == self.num_envs
+
         obj_set = options.get("obj_set", "train")
         if obj_set == "train":
             lc = 16
@@ -1666,39 +1555,17 @@ class PutOnPlateInScene25Carrot(PutOnPlateInScene25MainV3):
         l2 = len(self.quat_configs)
         ltt = lc * lp * lo * l1 * l2
 
-        ############################################################################################################
-        ## Partial Reset, Revised by Tonghe on 07/13/2025 ###########################################################
-        num_envs_to_reset = len(env_idx)
         # rand and select
-        # Synchronized reset:
-        if len(env_idx) == self.num_envs:
-            episode_id = options.get("episode_id",
-                                    torch.randint(low=0, high=ltt, size=(self.num_envs,), device=self.device))
-            episode_id = episode_id.reshape(self.num_envs)
-            episode_id = episode_id % ltt
-        elif 0< len(env_idx) and len(env_idx) < self.num_envs:
-            # Asynchronous (partial) reset
-            # env_idx are the ids of environments to be reset. 
-            # When there is a done env, env_idx is not empty. 
-            # Generate random integers within (0,ltt) at those coordinates in list env_idx (which should be reset)
-            # and keep the episode_id the same as before (queried from self.episode_id) at other coordinates 
-            episode_id = self.episode_id.clone()
-            reset_env_ids = torch.tensor(env_idx, device=self.device, dtype=torch.long)
-            # Use the environment's proper RNG instead of global torch.randint. 
-            # Warning: if you use the same seed during reset, each environment will always reset to the same scene, which correspond to the same episode_id. 
-            # To add diversity, you can pass different (however, reproducible) seeds during reset, like, increase the base_seed by 1 for each manual reset at the start of a new parallel rollout. 
-            reset_episode_id_vals = torch.randint(0, ltt, (num_envs_to_reset,), device=self.device)
-            episode_id[reset_env_ids] = reset_episode_id_vals
-            episode_id = episode_id.reshape(self.num_envs)
-            print(f"|Execute partial reset| with env_idx={env_idx}, reset_episode_id_vals={reset_episode_id_vals}: episode_id={episode_id}")
-        self.episode_id: torch.Tensor = episode_id
-        ############################################################################################################
+        episode_id = options.get("episode_id",
+                                 torch.randint(low=0, high=ltt, size=(b,), device=self.device))
+        episode_id = episode_id.reshape(b)
+        episode_id = episode_id % ltt
 
-        self.select_carrot_ids = episode_id // (lp * lo * l1 * l2) + lc_offset  # [b] # type: ignore
-        self.select_plate_ids = (episode_id // (lo * l1 * l2)) % lp  # type: ignore
-        self.select_overlay_ids = (episode_id // (l1 * l2)) % lo + lo_offset  # type: ignore
-        self.select_pos_ids = (episode_id // l2) % l1  # type: ignore
-        self.select_quat_ids = episode_id % l2  # type: ignore
+        self.select_carrot_ids = episode_id // (lp * lo * l1 * l2) + lc_offset  # [b]
+        self.select_plate_ids = (episode_id // (lo * l1 * l2)) % lp
+        self.select_overlay_ids = (episode_id // (l1 * l2)) % lo + lo_offset
+        self.select_pos_ids = (episode_id // l2) % l1
+        self.select_quat_ids = episode_id % l2
 
 
 @register_env("PutOnPlateInScene25Instruct-v1", max_episode_steps=80, asset_download_ids=["bridge_v2_real2sim"])
@@ -1706,6 +1573,10 @@ class PutOnPlateInScene25Instruct(PutOnPlateInScene25MainV3):
     select_extra_ids: torch.Tensor
 
     def _initialize_episode_pre(self, env_idx: torch.Tensor, options: dict):
+        # NOTE: this part of code is not GPU parallelized
+        b = len(env_idx)
+        assert b == self.num_envs
+
         obj_set = options.get("obj_set", "train")
         if obj_set == "train":
             le = 1
@@ -1728,40 +1599,18 @@ class PutOnPlateInScene25Instruct(PutOnPlateInScene25MainV3):
         l2 = len(self.quat_configs)
         ltt = lc * le * lp * lo * l1 * l2
 
-        ############################################################################################################
-        ## Partial Reset, Revised by Tonghe on 07/13/2025 ###########################################################
-        num_envs_to_reset = len(env_idx)
         # rand and select
-        # Synchronized reset:
-        if len(env_idx) == self.num_envs:
-            episode_id = options.get("episode_id",
-                                    torch.randint(low=0, high=ltt, size=(self.num_envs,), device=self.device))
-            episode_id = episode_id.reshape(self.num_envs)
-            episode_id = episode_id % ltt
-        elif 0< len(env_idx) and len(env_idx) < self.num_envs:
-            # Asynchronous (partial) reset
-            # env_idx are the ids of environments to be reset. 
-            # When there is a done env, env_idx is not empty. 
-            # Generate random integers within (0,ltt) at those coordinates in list env_idx (which should be reset)
-            # and keep the episode_id the same as before (queried from self.episode_id) at other coordinates 
-            episode_id = self.episode_id.clone()
-            reset_env_ids = torch.tensor(env_idx, device=self.device, dtype=torch.long)
-            # Use the environment's proper RNG instead of global torch.randint. 
-            # Warning: if you use the same seed during reset, each environment will always reset to the same scene, which correspond to the same episode_id. 
-            # To add diversity, you can pass different (however, reproducible) seeds during reset, like, increase the base_seed by 1 for each manual reset at the start of a new parallel rollout. 
-            reset_episode_id_vals = torch.randint(0, ltt, (num_envs_to_reset,), device=self.device)
-            episode_id[reset_env_ids] = reset_episode_id_vals
-            episode_id = episode_id.reshape(self.num_envs)
-            print(f"|Execute partial reset| with env_idx={env_idx}, reset_episode_id_vals={reset_episode_id_vals}: episode_id={episode_id}")
-        self.episode_id: torch.Tensor = episode_id
-        ############################################################################################################
+        episode_id = options.get("episode_id",
+                                 torch.randint(low=0, high=ltt, size=(b,), device=self.device))
+        episode_id = episode_id.reshape(b)
+        episode_id = episode_id % ltt
 
-        self.select_carrot_ids = episode_id // (le * lp * lo * l1 * l2) + lc_offset  # [b] # type: ignore
-        self.select_extra_ids = (episode_id // (lp * lo * l1 * l2)) % le + le_offset  # [b] # type: ignore
-        self.select_plate_ids = (episode_id // (lo * l1 * l2)) % lp  # type: ignore
-        self.select_overlay_ids = (episode_id // (l1 * l2)) % lo + lo_offset  # type: ignore
-        self.select_pos_ids = (episode_id // l2) % l1  # type: ignore
-        self.select_quat_ids = episode_id % l2  # type: ignore
+        self.select_carrot_ids = episode_id // (le * lp * lo * l1 * l2) + lc_offset  # [b]
+        self.select_extra_ids = (episode_id // (lp * lo * l1 * l2)) % le + le_offset  # [b]
+        self.select_plate_ids = (episode_id // (lo * l1 * l2)) % lp
+        self.select_overlay_ids = (episode_id // (l1 * l2)) % lo + lo_offset
+        self.select_pos_ids = (episode_id // l2) % l1
+        self.select_quat_ids = episode_id % l2
 
     def get_language_instruction(self):
         templates = [
@@ -1853,6 +1702,10 @@ class PutOnPlateInScene25Plate(PutOnPlateInScene25MainV3):
         assert len(self.overlay_mix_numpy) == 21
 
     def _initialize_episode_pre(self, env_idx: torch.Tensor, options: dict):
+        # NOTE: this part of code is not GPU parallelized
+        b = len(env_idx)
+        assert b == self.num_envs
+
         obj_set = options.get("obj_set", "train")
         if obj_set == "train":
             lp = 1
@@ -1874,39 +1727,17 @@ class PutOnPlateInScene25Plate(PutOnPlateInScene25MainV3):
         l2 = len(self.quat_configs)
         ltt = lc * lp * lo * l1 * l2
 
-        ############################################################################################################
-        ## Partial Reset, Revised by Tonghe on 07/13/2025 ###########################################################
-        num_envs_to_reset = len(env_idx)
         # rand and select
-        # Synchronized reset:
-        if len(env_idx) == self.num_envs:
-            episode_id = options.get("episode_id",
-                                    torch.randint(low=0, high=ltt, size=(self.num_envs,), device=self.device))
-            episode_id = episode_id.reshape(self.num_envs)
-            episode_id = episode_id % ltt
-        elif 0< len(env_idx) and len(env_idx) < self.num_envs:
-            # Asynchronous (partial) reset
-            # env_idx are the ids of environments to be reset. 
-            # When there is a done env, env_idx is not empty. 
-            # Generate random integers within (0,ltt) at those coordinates in list env_idx (which should be reset)
-            # and keep the episode_id the same as before (queried from self.episode_id) at other coordinates 
-            episode_id = self.episode_id.clone()
-            reset_env_ids = torch.tensor(env_idx, device=self.device, dtype=torch.long)
-            # Use the environment's proper RNG instead of global torch.randint. 
-            # Warning: if you use the same seed during reset, each environment will always reset to the same scene, which correspond to the same episode_id. 
-            # To add diversity, you can pass different (however, reproducible) seeds during reset, like, increase the base_seed by 1 for each manual reset at the start of a new parallel rollout. 
-            reset_episode_id_vals = torch.randint(0, ltt, (num_envs_to_reset,), device=self.device)
-            episode_id[reset_env_ids] = reset_episode_id_vals
-            episode_id = episode_id.reshape(self.num_envs)
-            print(f"|Execute partial reset| with env_idx={env_idx}, reset_episode_id_vals={reset_episode_id_vals}: episode_id={episode_id}")
-        self.episode_id: torch.Tensor = episode_id
-        ############################################################################################################
+        episode_id = options.get("episode_id",
+                                 torch.randint(low=0, high=ltt, size=(b,), device=self.device))
+        episode_id = episode_id.reshape(b)
+        episode_id = episode_id % ltt
 
-        self.select_carrot_ids = episode_id // (lp * lo * l1 * l2) + lc_offset  # [b] # type: ignore
-        self.select_plate_ids = (episode_id // (lo * l1 * l2)) % lp + lp_offset  # type: ignore
-        self.select_overlay_ids = (episode_id // (l1 * l2)) % lo + lo_offset  # type: ignore
-        self.select_pos_ids = (episode_id // l2) % l1  # type: ignore
-        self.select_quat_ids = episode_id % l2  # type: ignore
+        self.select_carrot_ids = episode_id // (lp * lo * l1 * l2) + lc_offset  # [b]
+        self.select_plate_ids = (episode_id // (lo * l1 * l2)) % lp + lp_offset
+        self.select_overlay_ids = (episode_id // (l1 * l2)) % lo + lo_offset
+        self.select_pos_ids = (episode_id // l2) % l1
+        self.select_quat_ids = episode_id % l2
 
 
 @register_env("PutOnPlateInScene25MultiCarrot-v1", max_episode_steps=80, asset_download_ids=["bridge_v2_real2sim"])
@@ -1963,6 +1794,9 @@ class PutOnPlateInScene25MultiCarrot(PutOnPlateInScene25MainV3):
         print(f"quat_configs: {quat_configs.shape}")
 
     def _initialize_episode_pre(self, env_idx: torch.Tensor, options: dict):
+        # NOTE: this part of code is not GPU parallelized
+        b = len(env_idx)
+        assert b == self.num_envs
 
         obj_set = options.get("obj_set", "train")
         if obj_set == "train":
@@ -1985,41 +1819,19 @@ class PutOnPlateInScene25MultiCarrot(PutOnPlateInScene25MainV3):
         l2 = len(self.quat_configs)
         ltt = lc * le * lp * lo * l1 * l2
 
-        ############################################################################################################
-        ## Partial Reset, Revised by Tonghe on 07/13/2025 ###########################################################
-        num_envs_to_reset = len(env_idx)
         # rand and select
-        # Synchronized reset:
-        if len(env_idx) == self.num_envs:
-            episode_id = options.get("episode_id",
-                                    torch.randint(low=0, high=ltt, size=(self.num_envs,), device=self.device))
-            episode_id = episode_id.reshape(self.num_envs)
-            episode_id = episode_id % ltt
-        elif 0< len(env_idx) and len(env_idx) < self.num_envs:
-            # Asynchronous (partial) reset
-            # env_idx are the ids of environments to be reset. 
-            # When there is a done env, env_idx is not empty. 
-            # Generate random integers within (0,ltt) at those coordinates in list env_idx (which should be reset)
-            # and keep the episode_id the same as before (queried from self.episode_id) at other coordinates 
-            episode_id = self.episode_id.clone()
-            reset_env_ids = torch.tensor(env_idx, device=self.device, dtype=torch.long)
-            # Use the environment's proper RNG instead of global torch.randint. 
-            # Warning: if you use the same seed during reset, each environment will always reset to the same scene, which correspond to the same episode_id. 
-            # To add diversity, you can pass different (however, reproducible) seeds during reset, like, increase the base_seed by 1 for each manual reset at the start of a new parallel rollout. 
-            reset_episode_id_vals = torch.randint(0, ltt, (num_envs_to_reset,), device=self.device)
-            episode_id[reset_env_ids] = reset_episode_id_vals
-            episode_id = episode_id.reshape(self.num_envs)
-            print(f"|Execute partial reset| with env_idx={env_idx}, reset_episode_id_vals={reset_episode_id_vals}: episode_id={episode_id}")
-        self.episode_id: torch.Tensor = episode_id
-        ############################################################################################################
+        episode_id = options.get("episode_id",
+                                 torch.randint(low=0, high=ltt, size=(b,), device=self.device))
+        episode_id = episode_id.reshape(b)
+        episode_id = episode_id % ltt
 
-        self.select_carrot_ids = episode_id // (le * lp * lo * l1 * l2) + lc_offset  # [b] # type: ignore
-        self.select_extra_ids = (episode_id // (lp * lo * l1 * l2)) % le  # [b]  # type: ignore
+        self.select_carrot_ids = episode_id // (le * lp * lo * l1 * l2) + lc_offset  # [b]
+        self.select_extra_ids = (episode_id // (lp * lo * l1 * l2)) % le  # [b]
         self.select_extra_ids = (self.select_carrot_ids + self.select_extra_ids + 1) % lc + lc_offset  # [b]
-        self.select_plate_ids = (episode_id // (lo * l1 * l2)) % lp  # type: ignore
-        self.select_overlay_ids = (episode_id // (l1 * l2)) % lo + lo_offset  # type: ignore
-        self.select_pos_ids = (episode_id // l2) % l1  # type: ignore
-        self.select_quat_ids = episode_id % l2  # type: ignore
+        self.select_plate_ids = (episode_id // (lo * l1 * l2)) % lp
+        self.select_overlay_ids = (episode_id // (l1 * l2)) % lo + lo_offset
+        self.select_pos_ids = (episode_id // l2) % l1
+        self.select_quat_ids = episode_id % l2
 
     def _initialize_episode(self, env_idx: torch.Tensor, options: dict):
         self._initialize_episode_pre(env_idx, options)
@@ -2030,31 +1842,19 @@ class PutOnPlateInScene25MultiCarrot(PutOnPlateInScene25MainV3):
         sensor = self._sensor_configs[self.rgb_camera_name]
         assert sensor.width == 640
         assert sensor.height == 480
-        ######### Partial Reset, Revised by Tonghe on 07/13/2025 ###################################################
-        # Handle overlay tensors for full vs partial reset - Keep full size for get_obs() method
-        overlay_images = np.stack([self.overlay_images_numpy[idx] for idx in self.select_overlay_ids[env_idx]])
-        overlay_textures = np.stack([self.overlay_textures_numpy[idx] for idx in self.select_overlay_ids[env_idx]])
-        overlay_mix = np.array([self.overlay_mix_numpy[idx] for idx in self.select_overlay_ids[env_idx]])
-        if not hasattr(self, 'overlay_images') or len(env_idx) == self.num_envs:
-            self.overlay_images = torch.zeros((self.num_envs, 480, 640, 3), device=self.device)
-        # Update only the environments being reset
-        self.overlay_images[env_idx] = torch.tensor(overlay_images, device=self.device, dtype=torch.float32)
-        if not hasattr(self, 'overlay_textures') or len(env_idx) == self.num_envs:
-            self.overlay_textures = torch.zeros((self.num_envs, 480, 640, 3), device=self.device, dtype=torch.float32)
-        # Update only the environments being reset
-        self.overlay_textures[env_idx] = torch.tensor(overlay_textures, device=self.device, dtype=torch.float32)
-        if not hasattr(self, 'overlay_mix') or len(env_idx) == self.num_envs:
-            self.overlay_mix = torch.zeros((self.num_envs,), device=self.device, dtype=torch.float32)
-        # Update only the environments being reset
-        self.overlay_mix[env_idx] = torch.tensor(overlay_mix, device=self.device, dtype=torch.float32)
-        ############################################################################################################
+        overlay_images = np.stack([self.overlay_images_numpy[idx] for idx in self.select_overlay_ids])
+        self.overlay_images = torch.tensor(overlay_images, device=self.device)  # [b, H, W, 3]
+        overlay_textures = np.stack([self.overlay_textures_numpy[idx] for idx in self.select_overlay_ids])
+        self.overlay_textures = torch.tensor(overlay_textures, device=self.device)  # [b, H, W, 3]
+        overlay_mix = np.array([self.overlay_mix_numpy[idx] for idx in self.select_overlay_ids])
+        self.overlay_mix = torch.tensor(overlay_mix, device=self.device)  # [b]
 
         # xyz and quat
         xyz_configs = torch.tensor(self.xyz_configs, device=self.device)
         quat_configs = torch.tensor(self.quat_configs, device=self.device)
 
-        select_carrot = [self.carrot_names[idx] for idx in self.select_carrot_ids[env_idx]]
-        select_plate = [self.plate_names[idx] for idx in self.select_plate_ids[env_idx]]
+        select_carrot = [self.carrot_names[idx] for idx in self.select_carrot_ids]
+        select_plate = [self.plate_names[idx] for idx in self.select_plate_ids]
         select_extra = [self.carrot_names[idx] for idx in self.select_extra_ids]
         carrot_actor = [self.objs_carrot[n] for n in select_carrot]
         plate_actor = [self.objs_plate[n] for n in select_plate]
@@ -2075,28 +1875,28 @@ class PutOnPlateInScene25MultiCarrot(PutOnPlateInScene25MainV3):
         # set pose for objs
         for idx, name in enumerate(self.model_db_carrot):
             p_reset = torch.tensor([1.0, 0.3 * idx, 1.0], device=self.device).reshape(1, -1).repeat(b, 1)  # [b, 3]
-            is_select = self.select_carrot_ids[env_idx] == idx  # [b]
-            p_select = xyz_configs[self.select_pos_ids[env_idx], 0].reshape(b, 3)  # [b, 3]
+            is_select = self.select_carrot_ids == idx  # [b]
+            p_select = xyz_configs[self.select_pos_ids, 0].reshape(b, 3)  # [b, 3]
             is_select_extra = self.select_extra_ids == idx  # [b]
-            p_select_extra = xyz_configs[self.select_pos_ids[env_idx], 2].reshape(b, 3)  # [b, 3]
+            p_select_extra = xyz_configs[self.select_pos_ids, 2].reshape(b, 3)  # [b, 3]
             p = torch.where(is_select.unsqueeze(1).repeat(1, 3), p_select, p_reset)  # [b, 3]
             p = torch.where(is_select_extra.unsqueeze(1).repeat(1, 3), p_select_extra, p)  # [b, 3]
 
             q_reset = torch.tensor([0, 0, 0, 1], device=self.device).reshape(1, -1).repeat(b, 1)  # [b, 4]
-            q_select = quat_configs[self.select_quat_ids[env_idx], 0].reshape(b, 4)  # [b, 4]
+            q_select = quat_configs[self.select_quat_ids, 0].reshape(b, 4)  # [b, 4]
             q = torch.where(is_select.unsqueeze(1).repeat(1, 4), q_select, q_reset)  # [b, 4]
             q = torch.where(is_select_extra.unsqueeze(1).repeat(1, 4), q_select, q)  # [b, 4]
 
             self.objs_carrot[name].set_pose(Pose.create_from_pq(p=p, q=q))
 
         for idx, name in enumerate(self.model_db_plate):
-            is_select = self.select_plate_ids[env_idx] == idx  # [b]
+            is_select = self.select_plate_ids == idx  # [b]
             p_reset = torch.tensor([2.0, 0.3 * idx, 1.0], device=self.device).reshape(1, -1).repeat(b, 1)  # [b, 3]
-            p_select = xyz_configs[self.select_pos_ids[env_idx], 1].reshape(b, 3)  # [b, 3]
+            p_select = xyz_configs[self.select_pos_ids, 1].reshape(b, 3)  # [b, 3]
             p = torch.where(is_select.unsqueeze(1).repeat(1, 3), p_select, p_reset)  # [b, 3]
 
             q_reset = torch.tensor([0, 0, 0, 1], device=self.device).reshape(1, -1).repeat(b, 1)  # [b, 4]
-            q_select = quat_configs[self.select_quat_ids[env_idx], 1].reshape(b, 4)  # [b, 4]
+            q_select = quat_configs[self.select_quat_ids, 1].reshape(b, 4)  # [b, 4]
             q = torch.where(is_select.unsqueeze(1).repeat(1, 4), q_select, q_reset)  # [b, 4]
 
             self.objs_plate[name].set_pose(Pose.create_from_pq(p=p, q=q))
@@ -2119,11 +1919,7 @@ class PutOnPlateInScene25MultiCarrot(PutOnPlateInScene25MainV3):
 
         # measured values for bridge dataset
         self.agent.robot.set_pose(self.initial_robot_pos)
-
-        robot_qpos = torch.tensor(self.robot_qpos, device=self.device)
-        initial_qpos = torch.tensor(self.initial_qpos, device=self.device).reshape(1, -1)  # [1, 8]
-        qpos = robot_qpos[self.select_extra_ids] + initial_qpos  # [b, 8]
-        self.agent.reset(init_qpos=qpos)
+        self.agent.reset(init_qpos=self.initial_qpos)
 
         # figure out object bounding boxes after settling. This is used to determine if an object is near the target object
         self.carrot_q_after_settle = torch.stack([a.pose.q[idx] for idx, a in enumerate(carrot_actor)])  # [b, 4]
@@ -2141,6 +1937,7 @@ class PutOnPlateInScene25MultiCarrot(PutOnPlateInScene25MainV3):
         c_q_matrix = rotation_conversions.quaternion_to_matrix(self.carrot_q_after_settle)  # [b, 3, 3]
         c_bbox_corners_rot = torch.matmul(c_bbox_corners, c_q_matrix.transpose(1, 2))  # [b, 8, 3]
         c_rotated_bbox_size = c_bbox_corners_rot.max(dim=1).values - c_bbox_corners_rot.min(dim=1).values  # [b, 3]
+        self.carrot_bbox_world = c_rotated_bbox_size  # [b, 3]
 
         # plate
         plate_bbox_world = torch.stack([self.model_bbox_sizes[n] for n in select_plate])  # [b, 3]
@@ -2150,40 +1947,25 @@ class PutOnPlateInScene25MultiCarrot(PutOnPlateInScene25MainV3):
         p_q_matrix = rotation_conversions.quaternion_to_matrix(self.plate_q_after_settle)  # [b, 3, 3]
         p_bbox_corners_rot = torch.matmul(p_bbox_corners, p_q_matrix.transpose(1, 2))  # [b, 8, 3]
         p_rotated_bbox_size = p_bbox_corners_rot.max(dim=1).values - p_bbox_corners_rot.min(dim=1).values  # [b, 3]
+        self.plate_bbox_world = p_rotated_bbox_size  # [b, 3]
 
-        ######### Partial Reset, Revised by Tonghe on 07/13/2025 ###################################################
-        # Handle bbox tensors for full vs partial reset - Keep full size for evaluate() method
-        if not hasattr(self, 'carrot_bbox_world') or len(env_idx) == self.num_envs:
-            self.carrot_bbox_world = torch.zeros((self.num_envs, 3), device=self.device)
-        # Update only the environments being reset
-        self.carrot_bbox_world[env_idx] = c_rotated_bbox_size
-        
-        if not hasattr(self, 'plate_bbox_world') or len(env_idx) == self.num_envs:
-            self.plate_bbox_world = torch.zeros((self.num_envs, 3), device=self.device)
-        # Update only the environments being reset
-        self.plate_bbox_world[env_idx] = p_rotated_bbox_size
+        # stats to track
+        self.consecutive_grasp = torch.zeros((b,), dtype=torch.int32, device=self.device)
+        self.episode_stats = dict(
+            # all_obj_keep_height=torch.zeros((b,), dtype=torch.bool),
+            # moved_correct_obj=torch.zeros((b,), dtype=torch.bool),
+            # moved_wrong_obj=torch.zeros((b,), dtype=torch.bool),
+            # near_tgt_obj=torch.zeros((b,), dtype=torch.bool),
+            is_src_obj_grasped=torch.zeros((b,), dtype=torch.bool, device=self.device),
+            # is_closest_to_tgt=torch.zeros((b,), dtype=torch.bool),
+            consecutive_grasp=torch.zeros((b,), dtype=torch.bool, device=self.device),
+            src_on_target=torch.zeros((b,), dtype=torch.bool, device=self.device),
 
-        # stats to track (for all the environments.)
-        if not hasattr(self, 'consecutive_grasp'):
-            self.consecutive_grasp = torch.zeros((self.num_envs,), dtype=torch.int32, device=self.device)
-            self.episode_stats = dict(
-                is_src_obj_grasped=torch.zeros((self.num_envs,), dtype=torch.bool, device=self.device),
-                consecutive_grasp=torch.zeros((self.num_envs,), dtype=torch.bool, device=self.device),
-                src_on_target=torch.zeros((self.num_envs,), dtype=torch.bool, device=self.device),
-                gripper_carrot_dist=torch.zeros((self.num_envs,), dtype=torch.float32, device=self.device),
-                gripper_plate_dist=torch.zeros((self.num_envs,), dtype=torch.float32, device=self.device),
-                carrot_plate_dist=torch.zeros((self.num_envs,), dtype=torch.float32, device=self.device),
-            )
-        else:
-            # only update info for the environments that are being reset. 
-            self.consecutive_grasp[env_idx] = 0
-            self.episode_stats["is_src_obj_grasped"][env_idx] = False
-            self.episode_stats["consecutive_grasp"][env_idx] = False
-            self.episode_stats["src_on_target"][env_idx] = False
-            self.episode_stats["gripper_carrot_dist"][env_idx] = 0.0
-            self.episode_stats["gripper_plate_dist"][env_idx] = 0.0
-            self.episode_stats["carrot_plate_dist"][env_idx] = 0.0
-        ############################################################################################################
+            gripper_carrot_dist=torch.zeros((b,), dtype=torch.float32, device=self.device),
+            gripper_plate_dist=torch.zeros((b,), dtype=torch.float32, device=self.device),
+            carrot_plate_dist=torch.zeros((b,), dtype=torch.float32, device=self.device),
+        )
+
 
 @register_env("PutOnPlateInScene25MultiPlate-v1", max_episode_steps=80, asset_download_ids=["bridge_v2_real2sim"])
 class PutOnPlateInScene25MultiPlate(PutOnPlateInScene25MainV3):
@@ -2286,6 +2068,9 @@ class PutOnPlateInScene25MultiPlate(PutOnPlateInScene25MainV3):
         print(f"quat_configs: {quat_configs.shape}")
 
     def _initialize_episode_pre(self, env_idx: torch.Tensor, options: dict):
+        # NOTE: this part of code is not GPU parallelized
+        b = len(env_idx)
+        assert b == self.num_envs
 
         obj_set = options.get("obj_set", "train")
         if obj_set == "train":
@@ -2312,33 +2097,11 @@ class PutOnPlateInScene25MultiPlate(PutOnPlateInScene25MainV3):
         l2 = len(self.quat_configs)
         ltt = lc * lp * le * lo * l1 * l2
 
-        ############################################################################################################
-        ## Partial Reset, Revised by Tonghe on 07/13/2025 ###########################################################
-        num_envs_to_reset = len(env_idx)
         # rand and select
-        # Synchronized reset:
-        if len(env_idx) == self.num_envs:
-            episode_id = options.get("episode_id",
-                                    torch.randint(low=0, high=ltt, size=(self.num_envs,), device=self.device))
-            episode_id = episode_id.reshape(self.num_envs)
-            episode_id = episode_id % ltt
-        elif 0< len(env_idx) and len(env_idx) < self.num_envs:
-            # Asynchronous (partial) reset
-            # env_idx are the ids of environments to be reset. 
-            # When there is a done env, env_idx is not empty. 
-            # Generate random integers within (0,ltt) at those coordinates in list env_idx (which should be reset)
-            # and keep the episode_id the same as before (queried from self.episode_id) at other coordinates 
-            episode_id = self.episode_id.clone()
-            reset_env_ids = torch.tensor(env_idx, device=self.device, dtype=torch.long)
-            # Use the environment's proper RNG instead of global torch.randint. 
-            # Warning: if you use the same seed during reset, each environment will always reset to the same scene, which correspond to the same episode_id. 
-            # To add diversity, you can pass different (however, reproducible) seeds during reset, like, increase the base_seed by 1 for each manual reset at the start of a new parallel rollout. 
-            reset_episode_id_vals = torch.randint(0, ltt, (num_envs_to_reset,), device=self.device)
-            episode_id[reset_env_ids] = reset_episode_id_vals
-            episode_id = episode_id.reshape(self.num_envs)
-            print(f"|Execute partial reset| with env_idx={env_idx}, reset_episode_id_vals={reset_episode_id_vals}: episode_id={episode_id}")
-        self.episode_id: torch.Tensor = episode_id
-        ############################################################################################################
+        episode_id = options.get("episode_id",
+                                 torch.randint(low=0, high=ltt, size=(b,), device=self.device))
+        episode_id = episode_id.reshape(b)
+        episode_id = episode_id % ltt
 
         self.select_carrot_ids = episode_id // (lp * le * lo * l1 * l2)  # [b]
         self.select_plate_ids = (episode_id // (le * lo * l1 * l2)) % lp
@@ -2360,31 +2123,19 @@ class PutOnPlateInScene25MultiPlate(PutOnPlateInScene25MainV3):
         sensor = self._sensor_configs[self.rgb_camera_name]
         assert sensor.width == 640
         assert sensor.height == 480
-        ######### Partial Reset, Revised by Tonghe on 07/13/2025 ###################################################
-        # Handle overlay tensors for full vs partial reset - Keep full size for get_obs() method
-        overlay_images = np.stack([self.overlay_images_numpy[idx] for idx in self.select_overlay_ids[env_idx]])
-        overlay_textures = np.stack([self.overlay_textures_numpy[idx] for idx in self.select_overlay_ids[env_idx]])
-        overlay_mix = np.array([self.overlay_mix_numpy[idx] for idx in self.select_overlay_ids[env_idx]])
-        if not hasattr(self, 'overlay_images') or len(env_idx) == self.num_envs:
-            self.overlay_images = torch.zeros((self.num_envs, 480, 640, 3), device=self.device)
-        # Update only the environments being reset
-        self.overlay_images[env_idx] = torch.tensor(overlay_images, device=self.device, dtype=torch.float32)
-        if not hasattr(self, 'overlay_textures') or len(env_idx) == self.num_envs:
-            self.overlay_textures = torch.zeros((self.num_envs, 480, 640, 3), device=self.device, dtype=torch.float32)
-        # Update only the environments being reset
-        self.overlay_textures[env_idx] = torch.tensor(overlay_textures, device=self.device, dtype=torch.float32)
-        if not hasattr(self, 'overlay_mix') or len(env_idx) == self.num_envs:
-            self.overlay_mix = torch.zeros((self.num_envs,), device=self.device, dtype=torch.float32)
-        # Update only the environments being reset
-        self.overlay_mix[env_idx] = torch.tensor(overlay_mix, device=self.device, dtype=torch.float32)
-        ############################################################################################################
+        overlay_images = np.stack([self.overlay_images_numpy[idx] for idx in self.select_overlay_ids])
+        self.overlay_images = torch.tensor(overlay_images, device=self.device)  # [b, H, W, 3]
+        overlay_textures = np.stack([self.overlay_textures_numpy[idx] for idx in self.select_overlay_ids])
+        self.overlay_textures = torch.tensor(overlay_textures, device=self.device)  # [b, H, W, 3]
+        overlay_mix = np.array([self.overlay_mix_numpy[idx] for idx in self.select_overlay_ids])
+        self.overlay_mix = torch.tensor(overlay_mix, device=self.device)  # [b]
 
         # xyz and quat
         xyz_configs = torch.tensor(self.xyz_configs, device=self.device)
         quat_configs = torch.tensor(self.quat_configs, device=self.device)
 
-        select_carrot = [self.carrot_names[idx] for idx in self.select_carrot_ids[env_idx]]
-        select_plate = [self.plate_names[idx] for idx in self.select_plate_ids[env_idx]]
+        select_carrot = [self.carrot_names[idx] for idx in self.select_carrot_ids]
+        select_plate = [self.plate_names[idx] for idx in self.select_plate_ids]
         select_extra = [self.plate_names[idx] for idx in self.select_extra_ids]
         carrot_actor = [self.objs_carrot[n] for n in select_carrot]
         plate_actor = [self.objs_plate[n] for n in select_plate]
@@ -2405,27 +2156,27 @@ class PutOnPlateInScene25MultiPlate(PutOnPlateInScene25MainV3):
         # set pose for objs
         for idx, name in enumerate(self.model_db_carrot):
             p_reset = torch.tensor([1.0, 0.3 * idx, 1.0], device=self.device).reshape(1, -1).repeat(b, 1)  # [b, 3]
-            is_select = self.select_carrot_ids[env_idx] == idx  # [b]
-            p_select = xyz_configs[self.select_pos_ids[env_idx], 0].reshape(b, 3)  # [b, 3]
+            is_select = self.select_carrot_ids == idx  # [b]
+            p_select = xyz_configs[self.select_pos_ids, 0].reshape(b, 3)  # [b, 3]
             p = torch.where(is_select.unsqueeze(1).repeat(1, 3), p_select, p_reset)  # [b, 3]
 
             q_reset = torch.tensor([0, 0, 0, 1], device=self.device).reshape(1, -1).repeat(b, 1)  # [b, 4]
-            q_select = quat_configs[self.select_quat_ids[env_idx], 0].reshape(b, 4)  # [b, 4]
+            q_select = quat_configs[self.select_quat_ids, 0].reshape(b, 4)  # [b, 4]
             q = torch.where(is_select.unsqueeze(1).repeat(1, 4), q_select, q_reset)  # [b, 4]
 
             self.objs_carrot[name].set_pose(Pose.create_from_pq(p=p, q=q))
 
         for idx, name in enumerate(self.model_db_plate):
             p_reset = torch.tensor([2.0, 0.3 * idx, 1.0], device=self.device).reshape(1, -1).repeat(b, 1)  # [b, 3]
-            is_select = self.select_plate_ids[env_idx] == idx  # [b]
-            p_select = xyz_configs[self.select_pos_ids[env_idx], 1].reshape(b, 3)  # [b, 3]
+            is_select = self.select_plate_ids == idx  # [b]
+            p_select = xyz_configs[self.select_pos_ids, 1].reshape(b, 3)  # [b, 3]
             is_select_extra = self.select_extra_ids == idx  # [b]
-            p_select_extra = xyz_configs[self.select_pos_ids[env_idx], 2].reshape(b, 3)  # [b, 3]
+            p_select_extra = xyz_configs[self.select_pos_ids, 2].reshape(b, 3)  # [b, 3]
             p = torch.where(is_select.unsqueeze(1).repeat(1, 3), p_select, p_reset)  # [b, 3]
             p = torch.where(is_select_extra.unsqueeze(1).repeat(1, 3), p_select_extra, p)  # [b, 3]
 
             q_reset = torch.tensor([0, 0, 0, 1], device=self.device).reshape(1, -1).repeat(b, 1)  # [b, 4]
-            q_select = quat_configs[self.select_quat_ids[env_idx], 1].reshape(b, 4)  # [b, 4]
+            q_select = quat_configs[self.select_quat_ids, 1].reshape(b, 4)  # [b, 4]
             q = torch.where(is_select.unsqueeze(1).repeat(1, 4), q_select, q_reset)  # [b, 4]
             q = torch.where(is_select_extra.unsqueeze(1).repeat(1, 4), q_select, q)
 
@@ -2449,11 +2200,7 @@ class PutOnPlateInScene25MultiPlate(PutOnPlateInScene25MainV3):
 
         # measured values for bridge dataset
         self.agent.robot.set_pose(self.initial_robot_pos)
-
-        robot_qpos = torch.tensor(self.robot_qpos, device=self.device)
-        initial_qpos = torch.tensor(self.initial_qpos, device=self.device).reshape(1, -1)  # [1, 8]
-        qpos = robot_qpos[self.select_extra_ids] + initial_qpos  # [b, 8]
-        self.agent.reset(init_qpos=qpos)
+        self.agent.reset(init_qpos=self.initial_qpos)
 
         # figure out object bounding boxes after settling. This is used to determine if an object is near the target object
         self.carrot_q_after_settle = torch.stack([a.pose.q[idx] for idx, a in enumerate(carrot_actor)])  # [b, 4]
@@ -2471,6 +2218,7 @@ class PutOnPlateInScene25MultiPlate(PutOnPlateInScene25MainV3):
         c_q_matrix = rotation_conversions.quaternion_to_matrix(self.carrot_q_after_settle)  # [b, 3, 3]
         c_bbox_corners_rot = torch.matmul(c_bbox_corners, c_q_matrix.transpose(1, 2))  # [b, 8, 3]
         c_rotated_bbox_size = c_bbox_corners_rot.max(dim=1).values - c_bbox_corners_rot.min(dim=1).values  # [b, 3]
+        self.carrot_bbox_world = c_rotated_bbox_size  # [b, 3]
 
         # plate
         plate_bbox_world = torch.stack([self.model_bbox_sizes[n] for n in select_plate])  # [b, 3]
@@ -2480,45 +2228,34 @@ class PutOnPlateInScene25MultiPlate(PutOnPlateInScene25MainV3):
         p_q_matrix = rotation_conversions.quaternion_to_matrix(self.plate_q_after_settle)  # [b, 3, 3]
         p_bbox_corners_rot = torch.matmul(p_bbox_corners, p_q_matrix.transpose(1, 2))  # [b, 8, 3]
         p_rotated_bbox_size = p_bbox_corners_rot.max(dim=1).values - p_bbox_corners_rot.min(dim=1).values  # [b, 3]
-        ######### Partial Reset, Revised by Tonghe on 07/13/2025 ###################################################
-        # Handle bbox tensors for full vs partial reset - Keep full size for evaluate() method
-        if not hasattr(self, 'carrot_bbox_world') or len(env_idx) == self.num_envs:
-            self.carrot_bbox_world = torch.zeros((self.num_envs, 3), device=self.device)
-        # Update only the environments being reset
-        self.carrot_bbox_world[env_idx] = c_rotated_bbox_size
-        
-        if not hasattr(self, 'plate_bbox_world') or len(env_idx) == self.num_envs:
-            self.plate_bbox_world = torch.zeros((self.num_envs, 3), device=self.device)
-        # Update only the environments being reset
-        self.plate_bbox_world[env_idx] = p_rotated_bbox_size
-        
-        # stats to track (for all the environments.)
-        if not hasattr(self, 'consecutive_grasp'):
-            self.consecutive_grasp = torch.zeros((self.num_envs,), dtype=torch.int32, device=self.device)
-            self.episode_stats = dict(
-                is_src_obj_grasped=torch.zeros((self.num_envs,), dtype=torch.bool, device=self.device),
-                consecutive_grasp=torch.zeros((self.num_envs,), dtype=torch.bool, device=self.device),
-                src_on_target=torch.zeros((self.num_envs,), dtype=torch.bool, device=self.device),
-                gripper_carrot_dist=torch.zeros((self.num_envs,), dtype=torch.float32, device=self.device),
-                gripper_plate_dist=torch.zeros((self.num_envs,), dtype=torch.float32, device=self.device),
-                carrot_plate_dist=torch.zeros((self.num_envs,), dtype=torch.float32, device=self.device),
-            )
-        else:
-            # only update info for the environments that are being reset. 
-            self.consecutive_grasp[env_idx] = 0
-            self.episode_stats["is_src_obj_grasped"][env_idx] = False
-            self.episode_stats["consecutive_grasp"][env_idx] = False
-            self.episode_stats["src_on_target"][env_idx] = False
-            self.episode_stats["gripper_carrot_dist"][env_idx] = 0.0
-            self.episode_stats["gripper_plate_dist"][env_idx] = 0.0
-            self.episode_stats["carrot_plate_dist"][env_idx] = 0.0
-        ############################################################################################################
+        self.plate_bbox_world = p_rotated_bbox_size  # [b, 3]
+
+        # stats to track
+        self.consecutive_grasp = torch.zeros((b,), dtype=torch.int32, device=self.device)
+        self.episode_stats = dict(
+            # all_obj_keep_height=torch.zeros((b,), dtype=torch.bool),
+            # moved_correct_obj=torch.zeros((b,), dtype=torch.bool),
+            # moved_wrong_obj=torch.zeros((b,), dtype=torch.bool),
+            # near_tgt_obj=torch.zeros((b,), dtype=torch.bool),
+            is_src_obj_grasped=torch.zeros((b,), dtype=torch.bool, device=self.device),
+            # is_closest_to_tgt=torch.zeros((b,), dtype=torch.bool),
+            consecutive_grasp=torch.zeros((b,), dtype=torch.bool, device=self.device),
+            src_on_target=torch.zeros((b,), dtype=torch.bool, device=self.device),
+
+            gripper_carrot_dist=torch.zeros((b,), dtype=torch.float32, device=self.device),
+            gripper_plate_dist=torch.zeros((b,), dtype=torch.float32, device=self.device),
+            carrot_plate_dist=torch.zeros((b,), dtype=torch.float32, device=self.device),
+        )
+
 
 # Action
 
 @register_env("PutOnPlateInScene25Position-v1", max_episode_steps=80, asset_download_ids=["bridge_v2_real2sim"])
 class PutOnPlateInScene25Position(PutOnPlateInScene25MainV3):
     def _initialize_episode_pre(self, env_idx: torch.Tensor, options: dict):
+        # NOTE: this part of code is not GPU parallelized
+        b = len(env_idx)
+        assert b == self.num_envs
 
         obj_set = options.get("obj_set", "train")
         if obj_set == "train":
@@ -2546,33 +2283,11 @@ class PutOnPlateInScene25Position(PutOnPlateInScene25MainV3):
         lp = len(self.plate_names)
         ltt = lc * lp * lo * l1 * l2
 
-        ############################################################################################################
-        ## Partial Reset, Revised by Tonghe on 07/13/2025 ###########################################################
-        num_envs_to_reset = len(env_idx)
         # rand and select
-        # Synchronized reset:
-        if len(env_idx) == self.num_envs:
-            episode_id = options.get("episode_id",
-                                    torch.randint(low=0, high=ltt, size=(self.num_envs,), device=self.device))
-            episode_id = episode_id.reshape(self.num_envs)
-            episode_id = episode_id % ltt
-        elif 0< len(env_idx) and len(env_idx) < self.num_envs:
-            # Asynchronous (partial) reset
-            # env_idx are the ids of environments to be reset. 
-            # When there is a done env, env_idx is not empty. 
-            # Generate random integers within (0,ltt) at those coordinates in list env_idx (which should be reset)
-            # and keep the episode_id the same as before (queried from self.episode_id) at other coordinates 
-            episode_id = self.episode_id.clone()
-            reset_env_ids = torch.tensor(env_idx, device=self.device, dtype=torch.long)
-            # Use the environment's proper RNG instead of global torch.randint. 
-            # Warning: if you use the same seed during reset, each environment will always reset to the same scene, which correspond to the same episode_id. 
-            # To add diversity, you can pass different (however, reproducible) seeds during reset, like, increase the base_seed by 1 for each manual reset at the start of a new parallel rollout. 
-            reset_episode_id_vals = torch.randint(0, ltt, (num_envs_to_reset,), device=self.device)
-            episode_id[reset_env_ids] = reset_episode_id_vals
-            episode_id = episode_id.reshape(self.num_envs)
-            print(f"|Execute partial reset| with env_idx={env_idx}, reset_episode_id_vals={reset_episode_id_vals}: episode_id={episode_id}")
-        self.episode_id: torch.Tensor = episode_id
-        ############################################################################################################
+        episode_id = options.get("episode_id",
+                                 torch.randint(low=0, high=ltt, size=(b,), device=self.device))
+        episode_id = episode_id.reshape(b)
+        episode_id = episode_id % ltt
 
         self.select_carrot_ids = episode_id // (lp * lo * l1 * l2) + lc_offset  # [b]
         self.select_plate_ids = (episode_id // (lo * l1 * l2)) % lp
@@ -2733,6 +2448,9 @@ class PutOnPlateInScene25EEPose(PutOnPlateInScene25MainV3):
         print(f"robot_qpos: {robot_qpos.shape}")
 
     def _initialize_episode_pre(self, env_idx: torch.Tensor, options: dict):
+        # NOTE: this part of code is not GPU parallelized
+        b = len(env_idx)
+        assert b == self.num_envs
 
         obj_set = options.get("obj_set", "train")
         if obj_set == "train":
@@ -2756,33 +2474,11 @@ class PutOnPlateInScene25EEPose(PutOnPlateInScene25MainV3):
         l2 = len(self.quat_configs)
         ltt = lc * le * lp * lo * l1 * l2
 
-        #############################################################################################################
-        ## Partial Reset, Revised by Tonghe on 07/13/2025 ###########################################################
-        num_envs_to_reset = len(env_idx)
         # rand and select
-        # Synchronized reset:
-        if len(env_idx) == self.num_envs:
-            episode_id = options.get("episode_id",
-                                    torch.randint(low=0, high=ltt, size=(self.num_envs,), device=self.device))
-            episode_id = episode_id.reshape(self.num_envs)
-            episode_id = episode_id % ltt
-        elif 0< len(env_idx) and len(env_idx) < self.num_envs:
-            # Asynchronous (partial) reset
-            # env_idx are the ids of environments to be reset. 
-            # When there is a done env, env_idx is not empty. 
-            # Generate random integers within (0,ltt) at those coordinates in list env_idx (which should be reset)
-            # and keep the episode_id the same as before (queried from self.episode_id) at other coordinates 
-            episode_id = self.episode_id.clone()
-            reset_env_ids = torch.tensor(env_idx, device=self.device, dtype=torch.long)
-            # Use the environment's proper RNG instead of global torch.randint. 
-            # Warning: if you use the same seed during reset, each environment will always reset to the same scene, which correspond to the same episode_id. 
-            # To add diversity, you can pass different (however, reproducible) seeds during reset, like, increase the base_seed by 1 for each manual reset at the start of a new parallel rollout. 
-            reset_episode_id_vals = torch.randint(0, ltt, (num_envs_to_reset,), device=self.device)
-            episode_id[reset_env_ids] = reset_episode_id_vals
-            episode_id = episode_id.reshape(self.num_envs)
-            print(f"|Execute partial reset| with env_idx={env_idx}, reset_episode_id_vals={reset_episode_id_vals}: episode_id={episode_id}")
-        self.episode_id: torch.Tensor = episode_id
-        ############################################################################################################
+        episode_id = options.get("episode_id",
+                                 torch.randint(low=0, high=ltt, size=(b,), device=self.device))
+        episode_id = episode_id.reshape(b)
+        episode_id = episode_id % ltt
 
         self.select_carrot_ids = episode_id // (le * lp * lo * l1 * l2) + lc_offset  # [b]
         self.select_extra_ids = (episode_id // (lp * lo * l1 * l2)) % le + le_offset  # [b]
@@ -2800,31 +2496,19 @@ class PutOnPlateInScene25EEPose(PutOnPlateInScene25MainV3):
         sensor = self._sensor_configs[self.rgb_camera_name]
         assert sensor.width == 640
         assert sensor.height == 480
-        ######### Partial Reset, Revised by Tonghe on 07/13/2025 ###################################################
-        # Handle overlay tensors for full vs partial reset - Keep full size for get_obs() method
-        overlay_images = np.stack([self.overlay_images_numpy[idx] for idx in self.select_overlay_ids[env_idx]])
-        overlay_textures = np.stack([self.overlay_textures_numpy[idx] for idx in self.select_overlay_ids[env_idx]])
-        overlay_mix = np.array([self.overlay_mix_numpy[idx] for idx in self.select_overlay_ids[env_idx]])
-        if not hasattr(self, 'overlay_images') or len(env_idx) == self.num_envs:
-            self.overlay_images = torch.zeros((self.num_envs, 480, 640, 3), device=self.device)
-        # Update only the environments being reset
-        self.overlay_images[env_idx] = torch.tensor(overlay_images, device=self.device, dtype=torch.float32)
-        if not hasattr(self, 'overlay_textures') or len(env_idx) == self.num_envs:
-            self.overlay_textures = torch.zeros((self.num_envs, 480, 640, 3), device=self.device, dtype=torch.float32)
-        # Update only the environments being reset
-        self.overlay_textures[env_idx] = torch.tensor(overlay_textures, device=self.device, dtype=torch.float32)
-        if not hasattr(self, 'overlay_mix') or len(env_idx) == self.num_envs:
-            self.overlay_mix = torch.zeros((self.num_envs,), device=self.device, dtype=torch.float32)
-        # Update only the environments being reset
-        self.overlay_mix[env_idx] = torch.tensor(overlay_mix, device=self.device, dtype=torch.float32)
-        ############################################################################################################
+        overlay_images = np.stack([self.overlay_images_numpy[idx] for idx in self.select_overlay_ids])
+        self.overlay_images = torch.tensor(overlay_images, device=self.device)  # [b, H, W, 3]
+        overlay_textures = np.stack([self.overlay_textures_numpy[idx] for idx in self.select_overlay_ids])
+        self.overlay_textures = torch.tensor(overlay_textures, device=self.device)  # [b, H, W, 3]
+        overlay_mix = np.array([self.overlay_mix_numpy[idx] for idx in self.select_overlay_ids])
+        self.overlay_mix = torch.tensor(overlay_mix, device=self.device)  # [b]
 
         # xyz and quat
         xyz_configs = torch.tensor(self.xyz_configs, device=self.device)
         quat_configs = torch.tensor(self.quat_configs, device=self.device)
 
-        select_carrot = [self.carrot_names[idx] for idx in self.select_carrot_ids[env_idx]]
-        select_plate = [self.plate_names[idx] for idx in self.select_plate_ids[env_idx]]
+        select_carrot = [self.carrot_names[idx] for idx in self.select_carrot_ids]
+        select_plate = [self.plate_names[idx] for idx in self.select_plate_ids]
         carrot_actor = [self.objs_carrot[n] for n in select_carrot]
         plate_actor = [self.objs_plate[n] for n in select_plate]
 
@@ -2842,25 +2526,25 @@ class PutOnPlateInScene25EEPose(PutOnPlateInScene25MainV3):
 
         # set pose for objs
         for idx, name in enumerate(self.model_db_carrot):
-            is_select = self.select_carrot_ids[env_idx] == idx  # [b]
+            is_select = self.select_carrot_ids == idx  # [b]
             p_reset = torch.tensor([1.0, 0.3 * idx, 1.0], device=self.device).reshape(1, -1).repeat(b, 1)  # [b, 3]
-            p_select = xyz_configs[self.select_pos_ids[env_idx], 0].reshape(b, 3)  # [b, 3]
+            p_select = xyz_configs[self.select_pos_ids, 0].reshape(b, 3)  # [b, 3]
             p = torch.where(is_select.unsqueeze(1).repeat(1, 3), p_select, p_reset)  # [b, 3]
 
             q_reset = torch.tensor([0, 0, 0, 1], device=self.device).reshape(1, -1).repeat(b, 1)  # [b, 4]
-            q_select = quat_configs[self.select_quat_ids[env_idx], 0].reshape(b, 4)  # [b, 4]
+            q_select = quat_configs[self.select_quat_ids, 0].reshape(b, 4)  # [b, 4]
             q = torch.where(is_select.unsqueeze(1).repeat(1, 4), q_select, q_reset)  # [b, 4]
 
             self.objs_carrot[name].set_pose(Pose.create_from_pq(p=p, q=q))
 
         for idx, name in enumerate(self.model_db_plate):
-            is_select = self.select_plate_ids[env_idx] == idx  # [b]
+            is_select = self.select_plate_ids == idx  # [b]
             p_reset = torch.tensor([2.0, 0.3 * idx, 1.0], device=self.device).reshape(1, -1).repeat(b, 1)  # [b, 3]
-            p_select = xyz_configs[self.select_pos_ids[env_idx], 1].reshape(b, 3)  # [b, 3]
+            p_select = xyz_configs[self.select_pos_ids, 1].reshape(b, 3)  # [b, 3]
             p = torch.where(is_select.unsqueeze(1).repeat(1, 3), p_select, p_reset)  # [b, 3]
 
             q_reset = torch.tensor([0, 0, 0, 1], device=self.device).reshape(1, -1).repeat(b, 1)  # [b, 4]
-            q_select = quat_configs[self.select_quat_ids[env_idx], 1].reshape(b, 4)  # [b, 4]
+            q_select = quat_configs[self.select_quat_ids, 1].reshape(b, 4)  # [b, 4]
             q = torch.where(is_select.unsqueeze(1).repeat(1, 4), q_select, q_reset)  # [b, 4]
 
             self.objs_plate[name].set_pose(Pose.create_from_pq(p=p, q=q))
@@ -2903,6 +2587,7 @@ class PutOnPlateInScene25EEPose(PutOnPlateInScene25MainV3):
         c_q_matrix = rotation_conversions.quaternion_to_matrix(self.carrot_q_after_settle)  # [b, 3, 3]
         c_bbox_corners_rot = torch.matmul(c_bbox_corners, c_q_matrix.transpose(1, 2))  # [b, 8, 3]
         c_rotated_bbox_size = c_bbox_corners_rot.max(dim=1).values - c_bbox_corners_rot.min(dim=1).values  # [b, 3]
+        self.carrot_bbox_world = c_rotated_bbox_size  # [b, 3]
 
         # plate
         plate_bbox_world = torch.stack([self.model_bbox_sizes[n] for n in select_plate])  # [b, 3]
@@ -2912,39 +2597,25 @@ class PutOnPlateInScene25EEPose(PutOnPlateInScene25MainV3):
         p_q_matrix = rotation_conversions.quaternion_to_matrix(self.plate_q_after_settle)  # [b, 3, 3]
         p_bbox_corners_rot = torch.matmul(p_bbox_corners, p_q_matrix.transpose(1, 2))  # [b, 8, 3]
         p_rotated_bbox_size = p_bbox_corners_rot.max(dim=1).values - p_bbox_corners_rot.min(dim=1).values  # [b, 3]
-        ######### Partial Reset, Revised by Tonghe on 07/13/2025 ###################################################
-        # Handle bbox tensors for full vs partial reset - Keep full size for evaluate() method
-        if not hasattr(self, 'carrot_bbox_world') or len(env_idx) == self.num_envs:
-            self.carrot_bbox_world = torch.zeros((self.num_envs, 3), device=self.device)
-        # Update only the environments being reset
-        self.carrot_bbox_world[env_idx] = c_rotated_bbox_size
-        
-        if not hasattr(self, 'plate_bbox_world') or len(env_idx) == self.num_envs:
-            self.plate_bbox_world = torch.zeros((self.num_envs, 3), device=self.device)
-        # Update only the environments being reset
-        self.plate_bbox_world[env_idx] = p_rotated_bbox_size
-        
-        # stats to track (for all the environments.)
-        if not hasattr(self, 'consecutive_grasp'):
-            self.consecutive_grasp = torch.zeros((self.num_envs,), dtype=torch.int32, device=self.device)
-            self.episode_stats = dict(
-                is_src_obj_grasped=torch.zeros((self.num_envs,), dtype=torch.bool, device=self.device),
-                consecutive_grasp=torch.zeros((self.num_envs,), dtype=torch.bool, device=self.device),
-                src_on_target=torch.zeros((self.num_envs,), dtype=torch.bool, device=self.device),
-                gripper_carrot_dist=torch.zeros((self.num_envs,), dtype=torch.float32, device=self.device),
-                gripper_plate_dist=torch.zeros((self.num_envs,), dtype=torch.float32, device=self.device),
-                carrot_plate_dist=torch.zeros((self.num_envs,), dtype=torch.float32, device=self.device),
-            )
-        else:
-            # only update info for the environments that are being reset. 
-            self.consecutive_grasp[env_idx] = 0
-            self.episode_stats["is_src_obj_grasped"][env_idx] = False
-            self.episode_stats["consecutive_grasp"][env_idx] = False
-            self.episode_stats["src_on_target"][env_idx] = False
-            self.episode_stats["gripper_carrot_dist"][env_idx] = 0.0
-            self.episode_stats["gripper_plate_dist"][env_idx] = 0.0
-            self.episode_stats["carrot_plate_dist"][env_idx] = 0.0
-        ############################################################################################################
+        self.plate_bbox_world = p_rotated_bbox_size  # [b, 3]
+
+        # stats to track
+        self.consecutive_grasp = torch.zeros((b,), dtype=torch.int32, device=self.device)
+        self.episode_stats = dict(
+            # all_obj_keep_height=torch.zeros((b,), dtype=torch.bool),
+            # moved_correct_obj=torch.zeros((b,), dtype=torch.bool),
+            # moved_wrong_obj=torch.zeros((b,), dtype=torch.bool),
+            # near_tgt_obj=torch.zeros((b,), dtype=torch.bool),
+            is_src_obj_grasped=torch.zeros((b,), dtype=torch.bool, device=self.device),
+            # is_closest_to_tgt=torch.zeros((b,), dtype=torch.bool),
+            consecutive_grasp=torch.zeros((b,), dtype=torch.bool, device=self.device),
+            src_on_target=torch.zeros((b,), dtype=torch.bool, device=self.device),
+
+            gripper_carrot_dist=torch.zeros((b,), dtype=torch.float32, device=self.device),
+            gripper_plate_dist=torch.zeros((b,), dtype=torch.float32, device=self.device),
+            carrot_plate_dist=torch.zeros((b,), dtype=torch.float32, device=self.device),
+        )
+
 
 @register_env("PutOnPlateInScene25PositionChangeTo-v1", max_episode_steps=80, asset_download_ids=["bridge_v2_real2sim"])
 class PutOnPlateInScene25PositionChange(PutOnPlateInScene25MainV3):
@@ -3003,6 +2674,9 @@ class PutOnPlateInScene25PositionChange(PutOnPlateInScene25MainV3):
         self.can_change_position = False
 
     def _initialize_episode_pre(self, env_idx: torch.Tensor, options: dict):
+        # NOTE: this part of code is not GPU parallelized
+        b = len(env_idx)
+        assert b == self.num_envs
 
         obj_set = options.get("obj_set", "train")
         if obj_set == "train":
@@ -3023,33 +2697,11 @@ class PutOnPlateInScene25PositionChange(PutOnPlateInScene25MainV3):
         l2 = len(self.quat_configs)
         ltt = lc * lp * lo * l1 * l2
 
-        ############################################################################################################
-        ## Partial Reset, Revised by Tonghe on 07/13/2025 ###########################################################
-        num_envs_to_reset = len(env_idx)
         # rand and select
-        # Synchronized reset:
-        if len(env_idx) == self.num_envs:
-            episode_id = options.get("episode_id",
-                                    torch.randint(low=0, high=ltt, size=(self.num_envs,), device=self.device))
-            episode_id = episode_id.reshape(self.num_envs)
-            episode_id = episode_id % ltt
-        elif 0< len(env_idx) and len(env_idx) < self.num_envs:
-            # Asynchronous (partial) reset
-            # env_idx are the ids of environments to be reset. 
-            # When there is a done env, env_idx is not empty. 
-            # Generate random integers within (0,ltt) at those coordinates in list env_idx (which should be reset)
-            # and keep the episode_id the same as before (queried from self.episode_id) at other coordinates 
-            episode_id = self.episode_id.clone()
-            reset_env_ids = torch.tensor(env_idx, device=self.device, dtype=torch.long)
-            # Use the environment's proper RNG instead of global torch.randint. 
-            # Warning: if you use the same seed during reset, each environment will always reset to the same scene, which correspond to the same episode_id. 
-            # To add diversity, you can pass different (however, reproducible) seeds during reset, like, increase the base_seed by 1 for each manual reset at the start of a new parallel rollout. 
-            reset_episode_id_vals = torch.randint(0, ltt, (num_envs_to_reset,), device=self.device)
-            episode_id[reset_env_ids] = reset_episode_id_vals
-            episode_id = episode_id.reshape(self.num_envs)
-            print(f"|Execute partial reset| with env_idx={env_idx}, reset_episode_id_vals={reset_episode_id_vals}: episode_id={episode_id}")
-        self.episode_id: torch.Tensor = episode_id
-        ############################################################################################################
+        episode_id = options.get("episode_id",
+                                 torch.randint(low=0, high=ltt, size=(b,), device=self.device))
+        episode_id = episode_id.reshape(b)
+        episode_id = episode_id % ltt
 
         self.select_carrot_ids = episode_id // (lp * lo * l1 * l2) + lc_offset  # [b]
         self.select_plate_ids = (episode_id // (lo * l1 * l2)) % lp
