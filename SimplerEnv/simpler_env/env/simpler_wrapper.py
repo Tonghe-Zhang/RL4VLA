@@ -4,7 +4,7 @@ import torch
 from mani_skill.envs.sapien_env import BaseEnv
 
 
-class SimlerWrapper:
+class SimplerWrapper:
     def __init__(self, all_args, unnorm_state, extra_seed=0):
         self.args = all_args
         self.unnorm_state = unnorm_state

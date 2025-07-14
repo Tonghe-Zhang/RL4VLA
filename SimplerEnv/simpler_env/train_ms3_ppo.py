@@ -17,7 +17,7 @@ from tqdm import tqdm
 from mani_skill.utils import visualization
 from mani_skill.utils.visualization.misc import images_to_video
 
-from simpler_env.env.simpler_wrapper import SimlerWrapper
+from simpler_env.env.simpler_wrapper import SimplerWrapper
 from simpler_env.utils.replay_buffer import SeparatedReplayBuffer
 
 signal.signal(signal.SIGINT, signal.SIG_DFL)  # allow ctrl+c
@@ -121,7 +121,7 @@ class Runner:
 
         # env
         unnorm_state = self.policy.vla.get_action_stats(self.args.vla_unnorm_key)
-        self.env = SimlerWrapper(self.args, unnorm_state)
+        self.env = SimplerWrapper(self.args, unnorm_state)
 
         # buffer
         self.buffer = SeparatedReplayBuffer(
