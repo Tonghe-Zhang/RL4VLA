@@ -946,23 +946,33 @@ class BaseEnv(gym.Env):
 
         If ``action`` is None, the environment will proceed forward in time without sending any actions/control signals to the agent
         """
+        import logging 
+        logger=logging.getLogger(__name__)
+        logger.info(f"*{self.__class__.__name__}: step()")
+        
         action = self._step_action(action)
         self._elapsed_steps += 1
         info = self.get_info()
         obs = self.get_obs(info)
         reward = self.get_reward(obs=obs, action=action, info=info)
+        
+        logger.info(f"***info contain ['success']? {'success' in info}, contain fail? {'fail' in info}")
+        logger.info(f"***_reward_mode={self._reward_mode}")
         if "success" in info:
-
             if "fail" in info:
                 terminated = torch.logical_or(info["success"], info["fail"])
+                logger.info(f"""*****success and fail both in info, terminated=torch.logical_or(info["success"], info["fail"])""")
             else:
                 terminated = info["success"].clone()
+                logger.info(f"""*****success in info but fail not in. terminated = info["success"].clone()""")
         else:
             if "fail" in info:
                 terminated = info["fail"].clone()
+                logger.info(f"""*****fail in info while success not in. terminated = info["fail"].clone().  info["fail"]= {info["fail"]}""")
             else:
                 terminated = torch.zeros(self.num_envs, dtype=bool, device=self.device)
-
+                logger.info(f"""*****No success no info terminated is False.s""")
+        logger.info(f"*****About to return all zero 'truncated'. ")
         return (
             obs,
             reward,

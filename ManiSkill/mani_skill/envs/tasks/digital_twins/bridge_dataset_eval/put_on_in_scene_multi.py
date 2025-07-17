@@ -412,18 +412,22 @@ class PutOnPlateInScene25(BaseEnv):
             self.scene._gpu_fetch_all()
 
     def evaluate(self, success_require_src_completely_on_target=True):
+        """
+        Does this support partial reset?
+        """
         xy_flag_required_offset = 0.01
         z_flag_required_offset = 0.05
         netforce_flag_required_offset = 0.03
 
-        b = self.num_envs
+        # b = self.num_envs
+        num_envs=self.num_envs
         # print(f"self.select_carrot_ids={self.select_carrot_ids}")
         # actor
         select_carrot = [self.carrot_names[idx] for idx in self.select_carrot_ids]
         select_plate = [self.plate_names[idx] for idx in self.select_plate_ids]
         carrot_actor = [self.objs_carrot[n] for n in select_carrot]
         plate_actor = [self.objs_plate[n] for n in select_plate]
-
+        
         carrot_p = torch.stack([a.pose.p[idx] for idx, a in enumerate(carrot_actor)])  # [b, 3]
         carrot_q = torch.stack([a.pose.q[idx] for idx, a in enumerate(carrot_actor)])  # [b, 4]
         plate_p = torch.stack([a.pose.p[idx] for idx, a in enumerate(plate_actor)])  # [b, 3]
@@ -457,7 +461,7 @@ class PutOnPlateInScene25(BaseEnv):
 
         # whether the source object is grasped
 
-        is_src_obj_grasped = torch.zeros((b,), dtype=torch.bool, device=self.device)  # [b]
+        is_src_obj_grasped = torch.zeros((num_envs,), dtype=torch.bool, device=self.device)  # [b]
         for idx, name in enumerate(self.model_db_carrot):
             is_select = self.select_carrot_ids == idx  # [b]
             grasped = self.agent.is_grasping(self.objs_carrot[name])  # [b]
@@ -490,7 +494,7 @@ class PutOnPlateInScene25(BaseEnv):
 
         if success_require_src_completely_on_target:
             # whether the source object is on the target object based on contact information
-            net_forces = torch.zeros((b,), dtype=torch.float32, device=self.device)  # [b]
+            net_forces = torch.zeros((num_envs,), dtype=torch.float32, device=self.device)  # [b]
             for idx in range(self.num_envs):
                 force = self.scene.get_pairwise_contact_forces(
                     self.objs_carrot[select_carrot[idx]],

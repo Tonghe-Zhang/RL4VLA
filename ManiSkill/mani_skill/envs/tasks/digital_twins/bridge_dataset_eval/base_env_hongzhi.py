@@ -1,9 +1,5 @@
 """
-Base environment for Bridge dataset environments. 
-Revised from hongzhi zang's branch on https://github.com/zanghz21/ManiSkill/blob/digital-twin-auto-reset/mani_skill/envs/tasks/digital_twins/bridge_dataset_eval/base_env.py . 
-With changes:
-1. remove objects_excluded_from_greenscreening and relevant greensceening code. 
-2. use delta control. 
+Base environment for Bridge dataset environments
 """
 import os
 from typing import Dict, List, Literal
@@ -107,7 +103,6 @@ class WidowX250SBridgeDatasetFlatTable(WidowX250S):
             ee_link="ee_gripper_link",
             urdf_path=self.urdf_path,
             normalize_action=False,
-            use_delta=True  # from RL4VLA original version
         )
         arm_pd_ee_target_delta_pose_align2 = PDEEPoseControllerConfig(
             **arm_common_kwargs, use_target=True
@@ -163,6 +158,8 @@ class BaseBridgeEnv(BaseDigitalTwinEnv):
     SUPPORTED_OBS_MODES = ["rgb+segmentation"]
     SUPPORTED_REWARD_MODES = ["none"]
     scene_setting: Literal["flat_table", "sink"] = "flat_table"
+    objects_excluded_from_greenscreening: List[str] = []
+    """object ids that should not be greenscreened"""
 
     obj_static_friction = 0.5
     obj_dynamic_friction = 0.5
@@ -352,7 +349,11 @@ class BaseBridgeEnv(BaseDigitalTwinEnv):
             else:
                 raise ValueError(f"Model {model_id} does not have bbox info.")
         self.episode_model_bbox_sizes = model_bbox_sizes
-    
+
+        for obj_name in self.objects_excluded_from_greenscreening:
+            self.remove_object_from_greenscreen(self.objs[obj_name])
+        self.remove_object_from_greenscreen(self.agent.robot)
+
     def _initialize_episode(self, env_idx: torch.Tensor, options: dict):
         # NOTE: this part of code is not GPU parallelized
         with torch.device(self.device):

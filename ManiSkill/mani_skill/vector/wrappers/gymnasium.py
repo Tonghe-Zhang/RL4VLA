@@ -112,8 +112,11 @@ class ManiSkillVectorEnv(VectorEnv):
     def step(
         self, actions: Union[Array, Dict]
     ) -> Tuple[Array, Array, Array, Array, Dict]:
+        import logging 
+        logger=logging.getLogger(__name__)
+        logger.info(f"*{self.__class__.__name__}: step()")
         obs, rew, terminations, truncations, infos = self._env.step(actions)
-
+        
         if self.record_metrics:
             episode_info = dict()
             self.returns += rew

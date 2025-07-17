@@ -68,7 +68,7 @@ class SimplerWrapper:
             0.5 * (normalized_actions + 1) * (action_high - action_low) + action_low,
             normalized_actions,
         )
-
+        
         raw_action = {
             "world_vector": raw_action_np[:, :3],
             "rotation_delta": raw_action_np[:, 3:6],
