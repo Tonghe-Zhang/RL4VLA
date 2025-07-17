@@ -1,3 +1,11 @@
+
+"""
+
+Multi-asset pick&place environment that supports partial reset. 
+Tonghe Zhang revised on 07/17/2025. 
+"""
+
+
 import os
 from pathlib import Path
 import cv2
