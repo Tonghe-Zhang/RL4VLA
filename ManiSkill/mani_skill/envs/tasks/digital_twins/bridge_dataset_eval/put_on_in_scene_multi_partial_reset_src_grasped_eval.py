@@ -421,6 +421,7 @@ class PutOnPlateInScene25(BaseEnv):
             self.scene._gpu_fetch_all()
     
     # def evaluate(self, success_require_src_completely_on_target=True):
+        
     #     xy_flag_required_offset = 0.01
     #     z_flag_required_offset = 0.05
     #     netforce_flag_required_offset = 0.03
@@ -540,6 +541,18 @@ class PutOnPlateInScene25(BaseEnv):
     
     
     def evaluate(self, success_require_src_completely_on_target=True):
+        """
+        The return values of evaluate() will be used to update self.info and returned by env.step(). 
+        """
+        self.evaluate_grasped(success_require_src_completely_on_target=success_require_src_completely_on_target)
+    
+    def evaluate_grasped(self, success_require_src_completely_on_target=True):
+        """
+        Revised by Tonghe on 07/19/2025. 
+        Strictly test if the object is on the plate AND the robot hand is grasping it. 
+        Prevent reward hacking by throwing the object. 
+        success = success & is_src_obj_grasped. 
+        """
         xy_flag_required_offset = 0.01
         z_flag_required_offset = 0.05
         netforce_flag_required_offset = 0.03
@@ -630,7 +643,7 @@ class PutOnPlateInScene25(BaseEnv):
 
             src_on_target = src_on_target & (net_forces > netforce_flag_required_offset)
 
-
+        
         # prepare dist
         gripper_p = (self.agent.finger1_link.pose.p + self.agent.finger2_link.pose.p) / 2  # [b, 3]
         gripper_q = (self.agent.finger1_link.pose.q + self.agent.finger2_link.pose.q) / 2  # [b, 4]
@@ -654,13 +667,12 @@ class PutOnPlateInScene25(BaseEnv):
         self.extra_stats["extra_pos_gripper"] = gripper_p
         self.extra_stats["extra_q_gripper"] = gripper_q
 
-        #######################################################################################
+        ########################################################################################
         # new evaluation metric here:
         success = src_on_target & self.episode_stats["is_src_obj_grasped"]
-        # from termcolor import colored
-        # print(colored(f"""Maniskill debug:: calling new evaluate function with success = src_on_target={src_on_target} & self.episode_stats["is_src_obj_grasped"]={self.episode_stats["is_src_obj_grasped"]}, success={success}""", color="yellow", on_color="on_yellow"))
+        from termcolor import colored
+        print(colored(f"""Maniskill debug:: calling new evaluate function with success = src_on_target & self.episode_stats["is_src_obj_grasped"]={success}""", color="yellow", on_color="on_yellow"))
         ########################################################################################
-        
         
         return dict(**self.episode_stats, success=success)
     
