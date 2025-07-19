@@ -376,7 +376,7 @@ class BaseBridgeEnv(BaseDigitalTwinEnv):
                 )
             if self.gpu_sim_enabled:
                 self.scene._gpu_apply_all()
-            # self._settle(0.5)
+            self._settle(0.5)
             if self.gpu_sim_enabled:
                 self.scene._gpu_fetch_all()
             # Some objects need longer time to settle
@@ -387,7 +387,7 @@ class BaseBridgeEnv(BaseDigitalTwinEnv):
             if lin_vel > 1e-3 or ang_vel > 1e-2:
                 if self.gpu_sim_enabled:
                     self.scene._gpu_apply_all()
-                # self._settle(6)
+                self._settle(6)
                 if self.gpu_sim_enabled:
                     self.scene._gpu_fetch_all()
             # measured values for bridge dataset
