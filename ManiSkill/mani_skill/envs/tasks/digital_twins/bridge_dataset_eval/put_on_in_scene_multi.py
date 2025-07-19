@@ -420,129 +420,131 @@ class PutOnPlateInScene25(BaseEnv):
         if self.gpu_sim_enabled:
             self.scene._gpu_fetch_all()
     
+    # def evaluate(self, success_require_src_completely_on_target=True):
+        
+    #     xy_flag_required_offset = 0.01
+    #     z_flag_required_offset = 0.05
+    #     netforce_flag_required_offset = 0.03
+
+    #     # b = self.num_envs
+    #     num_envs=self.num_envs
+    #     # print(f"self.select_carrot_ids={self.select_carrot_ids}")
+    #     # actor
+    #     select_carrot = [self.carrot_names[idx] for idx in self.select_carrot_ids]
+    #     select_plate = [self.plate_names[idx] for idx in self.select_plate_ids]
+    #     carrot_actor = [self.objs_carrot[n] for n in select_carrot]
+    #     plate_actor = [self.objs_plate[n] for n in select_plate]
+        
+    #     carrot_p = torch.stack([a.pose.p[idx] for idx, a in enumerate(carrot_actor)])  # [b, 3]
+    #     carrot_q = torch.stack([a.pose.q[idx] for idx, a in enumerate(carrot_actor)])  # [b, 4]
+    #     plate_p = torch.stack([a.pose.p[idx] for idx, a in enumerate(plate_actor)])  # [b, 3]
+    #     plate_q = torch.stack([a.pose.q[idx] for idx, a in enumerate(plate_actor)])  # [b, 4]
+
+    #     # whether moved the correct object
+    #     # source_obj_xy_move_dist = torch.linalg.norm(
+    #     #     self.episode_source_obj_xyz_after_settle[:, :2] - source_obj_pose.p[:, :2],
+    #     #     dim=1,
+    #     # )
+    #     # other_obj_xy_move_dist = []
+    #     # for obj_name in self.objs.keys():
+    #     #     obj = self.objs[obj_name]
+    #     #     obj_xyz_after_settle = self.episode_obj_xyzs_after_settle[obj_name]
+    #     #     if obj.name == self.source_obj_name:
+    #     #         continue
+    #     #     other_obj_xy_move_dist.append(
+    #     #         torch.linalg.norm(
+    #     #             obj_xyz_after_settle[:, :2] - obj.pose.p[:, :2], dim=1
+    #     #         )
+    #     #     )
+
+    #     # moved_correct_obj = (source_obj_xy_move_dist > 0.03) and (
+    #     #     all([x < source_obj_xy_move_dist for x in other_obj_xy_move_dist])
+    #     # )
+    #     # moved_wrong_obj = any([x > 0.03 for x in other_obj_xy_move_dist]) and any(
+    #     #     [x > source_obj_xy_move_dist for x in other_obj_xy_move_dist]
+    #     # )
+    #     # moved_correct_obj = False
+    #     # moved_wrong_obj = False
+
+    #     # whether the source object is grasped
+
+    #     is_src_obj_grasped = torch.zeros((num_envs,), dtype=torch.bool, device=self.device)  # [b]
+    #     for idx, name in enumerate(self.model_db_carrot):
+    #         is_select = self.select_carrot_ids == idx  # [b]
+    #         grasped = self.agent.is_grasping(self.objs_carrot[name])  # [b]
+    #         is_src_obj_grasped = torch.where(is_select, grasped, is_src_obj_grasped)  # [b]
+
+    #     # if is_src_obj_grasped:
+    #     self.consecutive_grasp += is_src_obj_grasped
+    #     self.consecutive_grasp[is_src_obj_grasped == 0] = 0
+    #     consecutive_grasp = self.consecutive_grasp >= 5
+
+    #     # whether the source object is on the target object based on bounding box position
+    #     tgt_obj_half_length_bbox = (
+    #             self.plate_bbox_world / 2
+    #     )  # get half-length of bbox xy diagonol distance in the world frame at timestep=0
+    #     src_obj_half_length_bbox = self.carrot_bbox_world / 2
+
+    #     pos_src = carrot_p
+    #     pos_tgt = plate_p
+    #     offset = pos_src - pos_tgt
+    #     xy_flag = (
+    #             torch.linalg.norm(offset[:, :2], dim=1)
+    #             <= tgt_obj_half_length_bbox.max(dim=1).values + xy_flag_required_offset
+    #     )
+    #     z_flag = (offset[:, 2] > 0) & (
+    #             offset[:, 2] - tgt_obj_half_length_bbox[:, 2] - src_obj_half_length_bbox[:, 2]
+    #             <= z_flag_required_offset
+    #     )
+    #     src_on_target = xy_flag & z_flag
+    #     # src_on_target = False
+
+    #     if success_require_src_completely_on_target:
+    #         # whether the source object is on the target object based on contact information
+    #         net_forces = torch.zeros((num_envs,), dtype=torch.float32, device=self.device)  # [b]
+    #         for idx in range(self.num_envs):
+    #             force = self.scene.get_pairwise_contact_forces(
+    #                 self.objs_carrot[select_carrot[idx]],
+    #                 self.objs_plate[select_plate[idx]],
+    #             )[idx]
+    #             force = torch.linalg.norm(force)
+    #             net_forces[idx] = force
+
+    #         src_on_target = src_on_target & (net_forces > netforce_flag_required_offset)
+
+    #     success = src_on_target
+
+    #     # prepare dist
+    #     gripper_p = (self.agent.finger1_link.pose.p + self.agent.finger2_link.pose.p) / 2  # [b, 3]
+    #     gripper_q = (self.agent.finger1_link.pose.q + self.agent.finger2_link.pose.q) / 2  # [b, 4]
+    #     gripper_carrot_dist = torch.linalg.norm(gripper_p - carrot_p, dim=1)  # [b, 3]
+    #     gripper_plate_dist = torch.linalg.norm(gripper_p - plate_p, dim=1)  # [b, 3]
+    #     carrot_plate_dist = torch.linalg.norm(carrot_p - plate_p, dim=1)  # [b, 3]
+
+    #     # self.episode_stats["moved_correct_obj"] = moved_correct_obj
+    #     # self.episode_stats["moved_wrong_obj"] = moved_wrong_obj
+    #     self.episode_stats["src_on_target"] = src_on_target
+    #     self.episode_stats["is_src_obj_grasped"] = self.episode_stats["is_src_obj_grasped"] | is_src_obj_grasped
+    #     self.episode_stats["consecutive_grasp"] = self.episode_stats["consecutive_grasp"] | consecutive_grasp
+    #     self.episode_stats["gripper_carrot_dist"] = gripper_carrot_dist
+    #     self.episode_stats["gripper_plate_dist"] = gripper_plate_dist
+    #     self.episode_stats["carrot_plate_dist"] = carrot_plate_dist
+
+    #     self.extra_stats["extra_pos_carrot"] = carrot_p
+    #     self.extra_stats["extra_q_carrot"] = carrot_q
+    #     self.extra_stats["extra_pos_plate"] = plate_p
+    #     self.extra_stats["extra_q_plate"] = plate_q
+    #     self.extra_stats["extra_pos_gripper"] = gripper_p
+    #     self.extra_stats["extra_q_gripper"] = gripper_q
+
+    #     return dict(**self.episode_stats, success=success)
+    
+    
     def evaluate(self, success_require_src_completely_on_target=True):
         """
-        Does this support partial reset?
+        The return values of evaluate() will be used to update self.info and returned by env.step(). 
         """
-        xy_flag_required_offset = 0.01
-        z_flag_required_offset = 0.05
-        netforce_flag_required_offset = 0.03
-
-        # b = self.num_envs
-        num_envs=self.num_envs
-        # print(f"self.select_carrot_ids={self.select_carrot_ids}")
-        # actor
-        select_carrot = [self.carrot_names[idx] for idx in self.select_carrot_ids]
-        select_plate = [self.plate_names[idx] for idx in self.select_plate_ids]
-        carrot_actor = [self.objs_carrot[n] for n in select_carrot]
-        plate_actor = [self.objs_plate[n] for n in select_plate]
-        
-        carrot_p = torch.stack([a.pose.p[idx] for idx, a in enumerate(carrot_actor)])  # [b, 3]
-        carrot_q = torch.stack([a.pose.q[idx] for idx, a in enumerate(carrot_actor)])  # [b, 4]
-        plate_p = torch.stack([a.pose.p[idx] for idx, a in enumerate(plate_actor)])  # [b, 3]
-        plate_q = torch.stack([a.pose.q[idx] for idx, a in enumerate(plate_actor)])  # [b, 4]
-
-        # whether moved the correct object
-        # source_obj_xy_move_dist = torch.linalg.norm(
-        #     self.episode_source_obj_xyz_after_settle[:, :2] - source_obj_pose.p[:, :2],
-        #     dim=1,
-        # )
-        # other_obj_xy_move_dist = []
-        # for obj_name in self.objs.keys():
-        #     obj = self.objs[obj_name]
-        #     obj_xyz_after_settle = self.episode_obj_xyzs_after_settle[obj_name]
-        #     if obj.name == self.source_obj_name:
-        #         continue
-        #     other_obj_xy_move_dist.append(
-        #         torch.linalg.norm(
-        #             obj_xyz_after_settle[:, :2] - obj.pose.p[:, :2], dim=1
-        #         )
-        #     )
-
-        # moved_correct_obj = (source_obj_xy_move_dist > 0.03) and (
-        #     all([x < source_obj_xy_move_dist for x in other_obj_xy_move_dist])
-        # )
-        # moved_wrong_obj = any([x > 0.03 for x in other_obj_xy_move_dist]) and any(
-        #     [x > source_obj_xy_move_dist for x in other_obj_xy_move_dist]
-        # )
-        # moved_correct_obj = False
-        # moved_wrong_obj = False
-
-        # whether the source object is grasped
-
-        is_src_obj_grasped = torch.zeros((num_envs,), dtype=torch.bool, device=self.device)  # [b]
-        for idx, name in enumerate(self.model_db_carrot):
-            is_select = self.select_carrot_ids == idx  # [b]
-            grasped = self.agent.is_grasping(self.objs_carrot[name])  # [b]
-            is_src_obj_grasped = torch.where(is_select, grasped, is_src_obj_grasped)  # [b]
-
-        # if is_src_obj_grasped:
-        self.consecutive_grasp += is_src_obj_grasped
-        self.consecutive_grasp[is_src_obj_grasped == 0] = 0
-        consecutive_grasp = self.consecutive_grasp >= 5
-
-        # whether the source object is on the target object based on bounding box position
-        tgt_obj_half_length_bbox = (
-                self.plate_bbox_world / 2
-        )  # get half-length of bbox xy diagonol distance in the world frame at timestep=0
-        src_obj_half_length_bbox = self.carrot_bbox_world / 2
-
-        pos_src = carrot_p
-        pos_tgt = plate_p
-        offset = pos_src - pos_tgt
-        xy_flag = (
-                torch.linalg.norm(offset[:, :2], dim=1)
-                <= tgt_obj_half_length_bbox.max(dim=1).values + xy_flag_required_offset
-        )
-        z_flag = (offset[:, 2] > 0) & (
-                offset[:, 2] - tgt_obj_half_length_bbox[:, 2] - src_obj_half_length_bbox[:, 2]
-                <= z_flag_required_offset
-        )
-        src_on_target = xy_flag & z_flag
-        # src_on_target = False
-
-        if success_require_src_completely_on_target:
-            # whether the source object is on the target object based on contact information
-            net_forces = torch.zeros((num_envs,), dtype=torch.float32, device=self.device)  # [b]
-            for idx in range(self.num_envs):
-                force = self.scene.get_pairwise_contact_forces(
-                    self.objs_carrot[select_carrot[idx]],
-                    self.objs_plate[select_plate[idx]],
-                )[idx]
-                force = torch.linalg.norm(force)
-                net_forces[idx] = force
-
-            src_on_target = src_on_target & (net_forces > netforce_flag_required_offset)
-
-        success = src_on_target
-
-        # prepare dist
-        gripper_p = (self.agent.finger1_link.pose.p + self.agent.finger2_link.pose.p) / 2  # [b, 3]
-        gripper_q = (self.agent.finger1_link.pose.q + self.agent.finger2_link.pose.q) / 2  # [b, 4]
-        gripper_carrot_dist = torch.linalg.norm(gripper_p - carrot_p, dim=1)  # [b, 3]
-        gripper_plate_dist = torch.linalg.norm(gripper_p - plate_p, dim=1)  # [b, 3]
-        carrot_plate_dist = torch.linalg.norm(carrot_p - plate_p, dim=1)  # [b, 3]
-
-        # self.episode_stats["moved_correct_obj"] = moved_correct_obj
-        # self.episode_stats["moved_wrong_obj"] = moved_wrong_obj
-        self.episode_stats["src_on_target"] = src_on_target
-        self.episode_stats["is_src_obj_grasped"] = self.episode_stats["is_src_obj_grasped"] | is_src_obj_grasped
-        self.episode_stats["consecutive_grasp"] = self.episode_stats["consecutive_grasp"] | consecutive_grasp
-        self.episode_stats["gripper_carrot_dist"] = gripper_carrot_dist
-        self.episode_stats["gripper_plate_dist"] = gripper_plate_dist
-        self.episode_stats["carrot_plate_dist"] = carrot_plate_dist
-
-        self.extra_stats["extra_pos_carrot"] = carrot_p
-        self.extra_stats["extra_q_carrot"] = carrot_q
-        self.extra_stats["extra_pos_plate"] = plate_p
-        self.extra_stats["extra_q_plate"] = plate_q
-        self.extra_stats["extra_pos_gripper"] = gripper_p
-        self.extra_stats["extra_q_gripper"] = gripper_q
-
-        return dict(**self.episode_stats, success=success)
-    
-    
-    
+        self.evaluate_grasped(success_require_src_completely_on_target=success_require_src_completely_on_target)
     
     def evaluate_grasped(self, success_require_src_completely_on_target=True):
         """
@@ -641,11 +643,10 @@ class PutOnPlateInScene25(BaseEnv):
 
             src_on_target = src_on_target & (net_forces > netforce_flag_required_offset)
 
-        success = src_on_target
         
-        # new stuff here:
-        success = success & is_src_obj_grasped
-
+        
+        
+        
         # prepare dist
         gripper_p = (self.agent.finger1_link.pose.p + self.agent.finger2_link.pose.p) / 2  # [b, 3]
         gripper_q = (self.agent.finger1_link.pose.q + self.agent.finger2_link.pose.q) / 2  # [b, 4]
@@ -669,6 +670,11 @@ class PutOnPlateInScene25(BaseEnv):
         self.extra_stats["extra_pos_gripper"] = gripper_p
         self.extra_stats["extra_q_gripper"] = gripper_q
 
+        ########################################################################################
+        # new evaluation metric here:
+        success = src_on_target & self.episode_stats["is_src_obj_grasped"]
+        ########################################################################################
+        
         return dict(**self.episode_stats, success=success)
     
     
@@ -794,6 +800,7 @@ class PutOnPlateInScene25MainV3(PutOnPlateInScene25):
         self._prep_init()
         # for debug:        
         super().__init__(**kwargs)
+        self.evaluate()
 
     def _prep_init(self):
         # models. here, `db` is for `database`
