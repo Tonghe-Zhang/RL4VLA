@@ -516,7 +516,7 @@ class PiZeroSFTDatasetBuilder:
             sample = {
                 "observation.state": state_tensor,     # [state_dim]
                 "action": action_tensor,               # [action_dim]
-                self.image_key: img_tensor,           # [3, H, W]
+                self.image_key: img_tensor,             # [3, H, W]
                 "task": instruction,                   # Task instruction string
                 "episode_index": episode_id,          # Episode ID
                 "frame_index": i,                      # Frame within episode

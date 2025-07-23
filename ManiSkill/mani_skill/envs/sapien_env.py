@@ -966,13 +966,13 @@ class BaseEnv(gym.Env):
             else:
                 terminated = info["success"].clone()
                 
-                import logging 
-                logger=logging.getLogger(__name__)
-                logger.info(f"DEBUG::BaseEnv: terminated={terminated}, info['success']={info['success']}")
-                if verbose: logger.info(f"""*****success in info but fail not in. terminated = info["success"].clone()""")
+                if verbose: 
+                    import logging 
+                    logger=logging.getLogger(__name__)
+                    logger.info(f"DEBUG::BaseEnv: terminated={terminated}, info['success']={info['success']}")
+                    logger.info(f"""*****success in info but fail not in. terminated = info["success"].clone()""")
         else:
             if "fail" in info:
-                
                 terminated = info["fail"].clone()
                 if verbose: logger.info(f"""*****fail in info while success not in. terminated = info["fail"].clone().  info["fail"]= {info["fail"]}""")
             else:
