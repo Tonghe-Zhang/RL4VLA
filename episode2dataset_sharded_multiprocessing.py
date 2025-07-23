@@ -163,8 +163,7 @@ def main():
     print(f"Sharding complete. Metadata written to {output_dir / 'shards_metadata.json'}")
 
 if __name__ == "__main__":
-    main() 
-    
+    main()
     
     """
     python /nvme_data/tonghe/RL4VLA/episode2dataset_sharded_multiprocessing.py \

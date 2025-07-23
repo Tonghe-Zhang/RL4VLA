@@ -1,12 +1,10 @@
-import os
-import sys
 import glob
 import numpy as np
 import torch
 from torchvision import transforms
 from tqdm import tqdm
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 import argparse
 import json
 from enum import Enum
