@@ -36,7 +36,7 @@ CARROT_DATASET_DIR = Path(__file__).parent / ".." / ".." / ".." / ".." / "assets
 
 
 # print partial reset information when it happens.
-DEBUG_PARTIAL_RESET = True
+DEBUG_PARTIAL_RESET = False
 from logging import getLogger
 logger = getLogger(__name__)
 
